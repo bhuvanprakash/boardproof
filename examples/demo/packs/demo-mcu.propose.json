@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "kind": "boardproof-rulepack",
+  "pack": {
+    "id": "u1-demo-mcu-simulated",
+    "part": "DEMO-GENERIC-MCU",
+    "manufacturer": "SIMULATED (not a real part)",
+    "package": "SIM_ONLY",
+    "status": "proposed",
+    "source": {
+      "document": "demo-mcu-SIMULATED.pdf",
+      "sha256": "c63cec49e313d43355f2340dd4884531e7f0bacbe4ed465e38e257bd8c90f384",
+      "pages": ""
+    },
+    "extracted_by": {
+      "engine": "offline:fixture(demo-mcu.facts.json)",
+      "model": null,
+      "at": "2026-11-13T19:32:04+00:00"
+    },
+    "reviewed_by": null,
+    "reviewed_at": null,
+    "review_notes": [
+      "SIMULATED PART: this fixture exists to exercise the pipeline. Do not ship it as a real rule pack.",
+      "U1.1: absolute maximum 4.2 V was NOT converted to a rule; absolute maximums are not operating limits. Reviewer must decide.",
+      "U1.5 (SDA) is not present on U1 in this netlist (package mismatch?); pull-up rule skipped rather than emitted unbound.",
+      "U1.6 (SCL) is not present on U1 in this netlist (package mismatch?); pull-up rule skipped rather than emitted unbound."
+    ]
+  },
+  "net_voltages": {},
+  "rules": [
+    {
+      "id": "u1-demo-mcu-simulated-max-voltage-u1-1",
+      "type": "max_voltage",
+      "component": "U1",
+      "pin": "1",
+      "min_v": 2.7,
+      "max_v": 3.6,
+      "citation": {
+        "page": "6",
+        "quote": "Recommended operating conditions: VDD 2.7 V to 3.6 V",
+        "section": "6.1",
+        "table": "6",
+        "confidence": 0.94
+      },
+      "note": "Recommended operating range for VDD from 3.3 V core supply."
+    },
+    {
+      "id": "u1-demo-mcu-simulated-connected-u1-2",
+      "type": "connected",
+      "component": "U1",
+      "pin": "2",
+      "citation": {
+        "page": "6",
+        "quote": "GND must be connected to the board ground plane",
+        "section": "6.1",
+        "confidence": 0.97
+      },
+      "note": "GND must be tied low."
+    }
+  ]
+}

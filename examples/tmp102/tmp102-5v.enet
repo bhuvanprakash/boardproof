@@ -1,0 +1,144 @@
+{
+  "version": "2.0.0",
+  "components": {
+    "tmp102_u1": {
+      "props": {
+        "Unique ID": "tmp102_u1",
+        "Designator": "U1",
+        "Value": "TMP102AIDRLR",
+        "Manufacturer Part": "TMP102AIDRLR",
+        "FootprintName": "SOT563-6"
+      },
+      "pinInfoMap": {
+        "1": {
+          "number": "1",
+          "name": "SCL",
+          "net": "I2C_SCL",
+          "props": {}
+        },
+        "2": {
+          "number": "2",
+          "name": "GND",
+          "net": "GND",
+          "props": {}
+        },
+        "3": {
+          "number": "3",
+          "name": "ALERT",
+          "net": "ALERT_N",
+          "props": {}
+        },
+        "4": {
+          "number": "4",
+          "name": "ADD0",
+          "net": "GND",
+          "props": {}
+        },
+        "5": {
+          "number": "5",
+          "name": "V+",
+          "net": "5V",
+          "props": {}
+        },
+        "6": {
+          "number": "6",
+          "name": "SDA",
+          "net": "I2C_SDA",
+          "props": {}
+        }
+      }
+    },
+    "tmp102_r1": {
+      "props": {
+        "Unique ID": "tmp102_r1",
+        "Designator": "R1",
+        "Value": "4.7k",
+        "Manufacturer Part": "RC0603FR-074K7L",
+        "FootprintName": "R0603"
+      },
+      "pinInfoMap": {
+        "1": {
+          "number": "1",
+          "name": "1",
+          "net": "I2C_SDA",
+          "props": {}
+        },
+        "2": {
+          "number": "2",
+          "name": "2",
+          "net": "3V3",
+          "props": {}
+        }
+      }
+    },
+    "tmp102_r2": {
+      "props": {
+        "Unique ID": "tmp102_r2",
+        "Designator": "R2",
+        "Value": "4.7k",
+        "Manufacturer Part": "RC0603FR-074K7L",
+        "FootprintName": "R0603"
+      },
+      "pinInfoMap": {
+        "1": {
+          "number": "1",
+          "name": "1",
+          "net": "I2C_SCL",
+          "props": {}
+        },
+        "2": {
+          "number": "2",
+          "name": "2",
+          "net": "3V3",
+          "props": {}
+        }
+      }
+    },
+    "tmp102_r3": {
+      "props": {
+        "Unique ID": "tmp102_r3",
+        "Designator": "R3",
+        "Value": "4.7k",
+        "Manufacturer Part": "RC0603FR-074K7L",
+        "FootprintName": "R0603"
+      },
+      "pinInfoMap": {
+        "1": {
+          "number": "1",
+          "name": "1",
+          "net": "ALERT_N",
+          "props": {}
+        },
+        "2": {
+          "number": "2",
+          "name": "2",
+          "net": "3V3",
+          "props": {}
+        }
+      }
+    },
+    "tmp102_c1": {
+      "props": {
+        "Unique ID": "tmp102_c1",
+        "Designator": "C1",
+        "Value": "10n",
+        "Manufacturer Part": "CL10B103KB8NNNC",
+        "FootprintName": "C0603"
+      },
+      "pinInfoMap": {
+        "1": {
+          "number": "1",
+          "name": "1",
+          "net": "3V3",
+          "props": {}
+        },
+        "2": {
+          "number": "2",
+          "name": "2",
+          "net": "GND",
+          "props": {}
+        }
+      }
+    }
+  }
+}

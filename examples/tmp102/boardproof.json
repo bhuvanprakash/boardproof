@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "netlist": "tmp102.enet",
+  "packs": [
+    "../../packs/tmp102-drl.json"
+  ],
+  "net_voltages": {
+    "GND": 0.0,
+    "3V3": 3.3,
+    "5V": 5.0
+  },
+  "rules": [
+    {
+      "id": "TMP102 V+ on the 3.3 V rail",
+      "type": "pin_net",
+      "component": "U1",
+      "pin": "5",
+      "net": "3V3"
+    }
+  ],
+  "packages": [
+    "../../packs/packages/tmp102.json"
+  ],
+  "net_currents": {
+    "3V3": 0.05,
+    "GND": 0.05,
+    "I2C_SDA": 0.003,
+    "I2C_SCL": 0.003,
+    "ALERT_N": 0.003
+  },
+  "copper_oz": 1.0
+}

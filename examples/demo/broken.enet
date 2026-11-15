@@ -1,0 +1,176 @@
+{
+  "version": "2.0.0",
+  "components": {
+    "demo_U1": {
+      "props": {
+        "Unique ID": "demo_U1",
+        "Designator": "U1",
+        "Value": "Demo MCU",
+        "Manufacturer Part": "DEMO-GENERIC",
+        "FootprintName": "SIM_ONLY"
+      },
+      "pinInfoMap": {
+        "1": {
+          "number": "1",
+          "name": "VDD",
+          "net": "5V",
+          "props": {
+            "Pin Number": "1"
+          }
+        },
+        "2": {
+          "number": "2",
+          "name": "GND",
+          "net": "GND",
+          "props": {
+            "Pin Number": "2"
+          }
+        },
+        "3": {
+          "number": "3",
+          "name": "GPIO4",
+          "net": "LED_STATUS",
+          "props": {
+            "Pin Number": "3"
+          }
+        },
+        "4": {
+          "number": "4",
+          "name": "GPIO5",
+          "net": "DEBUG",
+          "props": {
+            "Pin Number": "4"
+          }
+        }
+      }
+    },
+    "demo_U2": {
+      "props": {
+        "Unique ID": "demo_U2",
+        "Designator": "U2",
+        "Value": "I2C Sensor",
+        "Manufacturer Part": "DEMO-GENERIC",
+        "FootprintName": "SIM_ONLY"
+      },
+      "pinInfoMap": {
+        "1": {
+          "number": "1",
+          "name": "VDD",
+          "net": "3V3",
+          "props": {
+            "Pin Number": "1"
+          }
+        },
+        "2": {
+          "number": "2",
+          "name": "GND",
+          "net": "",
+          "props": {
+            "Pin Number": "2"
+          }
+        },
+        "3": {
+          "number": "3",
+          "name": "SDA",
+          "net": "I2C_SDA",
+          "props": {
+            "Pin Number": "3"
+          }
+        },
+        "4": {
+          "number": "4",
+          "name": "SCL",
+          "net": "I2C_SCL",
+          "props": {
+            "Pin Number": "4"
+          }
+        }
+      }
+    },
+    "demo_R2": {
+      "props": {
+        "Unique ID": "demo_R2",
+        "Designator": "R2",
+        "Value": "4.7k",
+        "Manufacturer Part": "DEMO-GENERIC",
+        "FootprintName": "SIM_ONLY"
+      },
+      "pinInfoMap": {
+        "1": {
+          "number": "1",
+          "name": "A",
+          "net": "I2C_SCL",
+          "props": {
+            "Pin Number": "1"
+          }
+        },
+        "2": {
+          "number": "2",
+          "name": "B",
+          "net": "3V3",
+          "props": {
+            "Pin Number": "2"
+          }
+        }
+      }
+    },
+    "demo_D1": {
+      "props": {
+        "Unique ID": "demo_D1",
+        "Designator": "D1",
+        "Value": "DEMO-LED",
+        "Manufacturer Part": "DEMO-GENERIC",
+        "FootprintName": "SIM_ONLY"
+      },
+      "pinInfoMap": {
+        "1": {
+          "number": "1",
+          "name": "A",
+          "net": "LED_STATUS",
+          "props": {
+            "Pin Number": "1"
+          }
+        },
+        "2": {
+          "number": "2",
+          "name": "K",
+          "net": "GND",
+          "props": {
+            "Pin Number": "2"
+          }
+        }
+      }
+    },
+    "demo_C1": {
+      "props": {
+        "Unique ID": "demo_C1",
+        "Designator": "C1",
+        "Value": "100nF",
+        "Manufacturer Part": "DEMO-GENERIC",
+        "FootprintName": "SIM_ONLY"
+      },
+      "pinInfoMap": {
+        "1": {
+          "number": "1",
+          "name": "A",
+          "net": "3V3",
+          "props": {
+            "Pin Number": "1"
+          }
+        },
+        "2": {
+          "number": "2",
+          "name": "B",
+          "net": "GND",
+          "props": {
+            "Pin Number": "2"
+          }
+        }
+      }
+    }
+  },
+  "designRule": {},
+  "differentialPair": {},
+  "netClass": {},
+  "equalLengthNetGroup": {}
+}

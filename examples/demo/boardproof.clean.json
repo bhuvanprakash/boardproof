@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "netlist": "clean.enet",
+  "firmware": "firmware_good.h",
+  "net_voltages": {
+    "GND": 0.0,
+    "3V3": 3.3,
+    "5V": 5.0
+  },
+  "rules": [
+    {
+      "id": "U1 supply net",
+      "type": "pin_net",
+      "component": "U1",
+      "pin": "1",
+      "net": "3V3"
+    },
+    {
+      "id": "U1 VDD max operating voltage",
+      "type": "max_voltage",
+      "component": "U1",
+      "pin": "1",
+      "min_v": 2.7,
+      "max_v": 3.6
+    },
+    {
+      "id": "sensor ground connected",
+      "type": "connected",
+      "component": "U2",
+      "pin": "2"
+    },
+    {
+      "id": "SDA pullup",
+      "type": "resistor_between",
+      "net_a": "I2C_SDA",
+      "net_b": "3V3",
+      "min_ohms": 1000,
+      "max_ohms": 10000
+    },
+    {
+      "id": "SCL pullup",
+      "type": "resistor_between",
+      "net_a": "I2C_SCL",
+      "net_b": "3V3",
+      "min_ohms": 1000,
+      "max_ohms": 10000
+    },
+    {
+      "id": "LED firmware matches schematic",
+      "type": "firmware_gpio",
+      "define": "LED_PIN",
+      "component": "U1",
+      "net": "LED_STATUS",
+      "pin_label_regex": "GPIO(\\d+)"
+    }
+  ]
+}

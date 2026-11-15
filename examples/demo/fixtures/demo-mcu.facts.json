@@ -1,0 +1,67 @@
+{
+  "component": "DEMO-GENERIC-MCU",
+  "manufacturer": "SIMULATED (not a real part)",
+  "package": "SIM_ONLY",
+  "_note": "Fixture for the offline engine. Values are simulated for the demo and are NOT any real silicon datasheet.",
+  "review_warnings": [
+    "SIMULATED PART: this fixture exists to exercise the pipeline. Do not ship it as a real rule pack."
+  ],
+  "pins": [
+    {
+      "number": "1",
+      "name": "VDD",
+      "function": "3.3 V core supply",
+      "recommended_min_v": 2.7,
+      "recommended_max_v": 3.6,
+      "absolute_max_v": 4.2,
+      "cited_page": "6",
+      "cited_section": "6.1",
+      "cited_table": "6",
+      "cited_quote": "Recommended operating conditions: VDD 2.7 V to 3.6 V",
+      "confidence": 0.94
+    },
+    {
+      "number": "2",
+      "name": "GND",
+      "function": "Ground reference",
+      "cited_page": "6",
+      "cited_section": "6.1",
+      "cited_quote": "GND must be connected to the board ground plane",
+      "confidence": 0.97
+    },
+    {
+      "number": "3",
+      "name": "GPIO4",
+      "function": "Digital I/O, LED status",
+      "cited_page": "9",
+      "cited_section": "7.3",
+      "cited_quote": "GPIO4 is a push-pull capable digital input/output",
+      "confidence": 0.9
+    },
+    {
+      "number": "5",
+      "name": "SDA",
+      "function": "I2C data",
+      "requires_pullup_to": "3V3",
+      "pullup_min_ohms": 1000,
+      "pullup_max_ohms": 10000,
+      "cited_page": "14",
+      "cited_section": "9.2",
+      "cited_table": "6",
+      "cited_quote": "SDA requires an external pull-up resistor of 1 kOhm to 10 kOhm to the I2C supply",
+      "confidence": 0.88
+    },
+    {
+      "number": "6",
+      "name": "SCL",
+      "function": "I2C clock",
+      "requires_pullup_to": "3V3",
+      "pullup_min_ohms": 1000,
+      "pullup_max_ohms": 10000,
+      "cited_page": "14",
+      "cited_section": "9.2",
+      "cited_quote": "SCL requires an external pull-up resistor to the I2C supply",
+      "confidence": 0.88
+    }
+  ]
+}

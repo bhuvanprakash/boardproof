@@ -1,0 +1,82 @@
+{
+  "schema_version": 1,
+  "netlist": "rev-c-fixed.enet",
+  "packs": [
+    "../../packs/tmp102-drl.json"
+  ],
+  "packages": [
+    "../../packs/packages/tmp102.json"
+  ],
+  "net_voltages": {
+    "GND": 0.0,
+    "3V3": 3.3,
+    "5V": 5.0
+  },
+  "net_currents": {
+    "3V3": 0.05,
+    "GND": 0.05,
+    "I2C_SDA": 0.003,
+    "I2C_SCL": 0.003,
+    "ALERT_N": 0.003
+  },
+  "copper_oz": 1.0,
+  "rules": [
+    {
+      "id": "V+ on the 3V3 rail",
+      "type": "pin_net",
+      "component": "U1",
+      "pin": "5",
+      "net": "3V3"
+    },
+    {
+      "id": "V+ supply window",
+      "type": "max_voltage",
+      "component": "U1",
+      "pin": "5",
+      "min_v": 1.4,
+      "max_v": 3.6,
+      "citation": {
+        "page": "4",
+        "section": "5.3",
+        "quote": "Supply voltage, 1.4 V to 3.6 V"
+      }
+    },
+    {
+      "id": "GND bonded",
+      "type": "connected",
+      "component": "U1",
+      "pin": "2"
+    },
+    {
+      "id": "ADD0 strapped low (0x48)",
+      "type": "pin_net",
+      "component": "U1",
+      "pin": "4",
+      "net": "GND"
+    },
+    {
+      "id": "I2C SDA pull-up",
+      "type": "resistor_between",
+      "net_a": "I2C_SDA",
+      "net_b": "3V3",
+      "min_ohms": 1000,
+      "max_ohms": 10000
+    },
+    {
+      "id": "I2C SCL pull-up",
+      "type": "resistor_between",
+      "net_a": "I2C_SCL",
+      "net_b": "3V3",
+      "min_ohms": 1000,
+      "max_ohms": 10000
+    },
+    {
+      "id": "ALERT pull-up",
+      "type": "resistor_between",
+      "net_a": "ALERT_N",
+      "net_b": "3V3",
+      "min_ohms": 1000,
+      "max_ohms": 10000
+    }
+  ]
+}
