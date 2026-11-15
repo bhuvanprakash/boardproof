@@ -1,0 +1,5 @@
+(sym_lib_table
+  (version 7)
+  (lib (name "MFN_Atmel")(type "Legacy")(uri "${KIPRJMOD}/MFN_Atmel.lib")(options "")(descr "Atmel"))
+  (lib (name "MFN_STMicro")(type "Legacy")(uri "${KIPRJMOD}/MFN_STMicro.lib")(options "")(descr "ST"))
+)
