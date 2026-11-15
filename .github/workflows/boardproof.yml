@@ -1,0 +1,134 @@
+name: BoardProof hardware checks
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  boardproof:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install BoardProof
+        run: python -m pip install -e .
+      - name: Unit tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Refuse to enforce an unvetted rule pack
+        run: |
+          set +e
+          boardproof check --config examples/demo/boardproof.pack.json >/dev/null 2>&1
+          printf 'vetted pack exit=%s (expected 1: board is broken)\n' "$?"
+          sed 's|packs/demo-mcu.json|packs/demo-mcu.propose.json|' \
+            examples/demo/boardproof.pack.json > examples/demo/.unvetted.tmp.json
+          boardproof check --config examples/demo/.unvetted.tmp.json
+          code=$?
+          rm -f examples/demo/.unvetted.tmp.json
+          printf 'unvetted pack exit=%s (expected 2: cannot verify)\n' "$code"
+          test "$code" -eq 2
+
+      - name: Red team the rule set
+        run: boardproof redteam --config examples/demo/boardproof.pack.clean.json --min-score 1.0 --json artifacts/redteam.json
+
+      - name: Performance budget
+        run: boardproof bench --components 4000 --rules 800 --repeat 3 --max-checks-ms 250 --json artifacts/bench.json
+
+      - name: Check clean board
+        run: boardproof check --config examples/demo/boardproof.pack.clean.json --json artifacts/clean.json --html artifacts/clean.html --annotate
+
+      - name: Explain and check broken board (expected to fail)
+        run: |
+          set +e
+          boardproof check --config examples/demo/boardproof.pack.json \
+            --explain --engine offline \
+            --json artifacts/broken.json --html artifacts/broken.html --annotate
+          test $? -eq 1
+
+      - name: Revision delta (clean -> broken demo)
+        if: always()
+        run: |
+          set +e
+          boardproof diff --base artifacts/clean.json --head artifacts/broken.json \
+            --no-fail --json artifacts/diff.json
+
+      - name: Manufacturing Preflight Passport
+        if: always()
+        run: |
+          set +e
+          boardproof passport --config examples/demo/boardproof.pack.json \
+            --revision "${{ github.ref_name }} @ ${{ github.sha }}" \
+            --redteam artifacts/redteam.json \
+            --out artifacts/passport.html --json artifacts/passport.json \
+            --engine offline
+
+      - name: Dashboard
+        if: always()
+        run: boardproof dashboard --dir artifacts
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: boardproof-report
+          path: artifacts/
+          if-no-files-found: ignore
+
+      - name: Upload passport
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: boardproof-passport
+          path: artifacts/passport.html
+          if-no-files-found: ignore
+
+  revision-gate:
+    # Block a PR only on violations it introduces, not on the existing backlog.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { path: head, fetch-depth: 0 }
+      - uses: actions/checkout@v4
+        with: { path: base, ref: '${{ github.base_ref }}' }
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - run: python -m pip install -e head
+      - name: Baseline from the base branch
+        run: |
+          set +e
+          (cd base && boardproof check --config examples/demo/boardproof.pack.json --json ../baseline.json) >/dev/null
+          echo "baseline exit=$? (exit 1 = pre-existing failures)"
+      - name: Head revision
+        run: |
+          set +e
+          (cd head && boardproof check --config examples/demo/boardproof.pack.json --json ../head.json) >/dev/null
+          echo "head exit=$?"
+      - name: Block only NEW violations
+        run: boardproof diff --base baseline.json --head head.json --annotate --json artifacts/diff.json
+
+  datasheet-diff:
+    # When a datasheet changes, show the reviewer the exact constraint delta.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - run: python -m pip install -e '.[ai]'
+      - name: Propose constraints from changed datasheets
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          changed=$(git diff --name-only "origin/${{ github.base_ref }}...HEAD" -- 'datasheets/*.pdf')
+          for pdf in $changed; do
+            base=$(basename "$pdf" .pdf)
+            boardproof infer --pdf "$pdf" --component U1 \
+              --previous "packs/${base}.json" \
+              --out "packs/${base}.propose.json" || exit 1
+            cat "packs/${base}.propose.json.diff" 2>/dev/null || true
+          done
+          echo "Proposals are UNTRUSTED. Promote with: boardproof vet --proposal ... --reviewer <name>"

@@ -1,0 +1,99 @@
+{
+  "schema_version": 1,
+  "kind": "boardproof-rulepack",
+  "pack": {
+    "id": "tmp102-drl",
+    "part": "TMP102",
+    "manufacturer": "Texas Instruments",
+    "package": "SOT563 (6)",
+    "status": "proposed",
+    "source": {
+      "document": "tmp102.pdf",
+      "sha256": "c9da6620ef95f75ce94372f670a84d168e05922dd32cebfaa6517083f15ebfaf",
+      "pages": ""
+    },
+    "extracted_by": {
+      "engine": "gemini:gemini-2.5-flash",
+      "model": "gemini-2.5-flash",
+      "at": "2026-11-13T19:44:35+00:00"
+    },
+    "reviewed_by": null,
+    "reviewed_at": null,
+    "review_notes": [
+      "U1.1 (SCL): a pull-up was detected but the cited quote contains no resistance value. Rule WITHHELD - review the datasheet text manually.",
+      "U1.1: absolute maximum 4 V was NOT converted to a rule; absolute maximums are not operating limits. Reviewer must decide.",
+      "U1.3 (ALERT): a pull-up was detected but the cited quote contains no resistance value. Rule WITHHELD - review the datasheet text manually.",
+      "U1.3: absolute maximum 4 V was NOT converted to a rule; absolute maximums are not operating limits. Reviewer must decide.",
+      "U1.4: absolute maximum 4 V was NOT converted to a rule; absolute maximums are not operating limits. Reviewer must decide.",
+      "U1.5 (V+): the cited quote does not contain 1.4-3.6 V. Rule WITHHELD - the citation does not support the number.",
+      "U1.5: absolute maximum 4 V was NOT converted to a rule; absolute maximums are not operating limits. Reviewer must decide.",
+      "U1.6 (SDA): a pull-up was detected but the cited quote contains no resistance value. Rule WITHHELD - review the datasheet text manually.",
+      "U1.6: absolute maximum 4 V was NOT converted to a rule; absolute maximums are not operating limits. Reviewer must decide.",
+      "pullup: 3 pull-up rule(s) proposed at 2500-10000 ohm from the recommended 5000 ohms (p.20). The window is a proposal, not a datasheet range.",
+      "pullup on SCL: a pull-up rule for pin 1 was already proposed by an earlier datasheet section; duplicate skipped.",
+      "pullup on SDA: a pull-up rule for pin 6 was already proposed by an earlier datasheet section; duplicate skipped.",
+      "pullup on ALERT: a pull-up rule for pin 3 was already proposed by an earlier datasheet section; duplicate skipped.",
+      "pullup: pullup supply voltage (p.20) - not machine-checkable yet; record it in review.",
+      "decoupling: bypass capacitor (p.20) - not machine-checkable yet; record it in review.",
+      "address: To configure one of four different addresses on the bus, connect the ADD0 pin to either the GND, V+, SDA, or SCL pin. (p.20) - not machine-checkable yet; record it in review."
+    ]
+  },
+  "net_voltages": {},
+  "rules": [
+    {
+      "id": "tmp102-drl-connected-u1-2",
+      "type": "connected",
+      "component": "U1",
+      "pin": "2",
+      "citation": {
+        "page": "3",
+        "quote": "Ground",
+        "section": "4 Pin Configuration",
+        "table": "Table 4-1. Pin Functions"
+      },
+      "note": "GND must be tied low."
+    },
+    {
+      "id": "tmp102-drl-pullup-u1-1",
+      "type": "resistor_between",
+      "net_a": "I2C_SCL",
+      "net_b": "3V3",
+      "min_ohms": 2500,
+      "max_ohms": 10000,
+      "citation": {
+        "page": "20",
+        "quote": "The recommended value for the pullup resistors is 5-KΩ.",
+        "section": "7.2.1 Design Requirements"
+      },
+      "note": "Datasheet recommends 5000 ohms for SCL. The accepted window 2500-10000 is a REVIEW PROPOSAL derived from that single value, not a documented range. Confirm before vetting."
+    },
+    {
+      "id": "tmp102-drl-pullup-u1-6",
+      "type": "resistor_between",
+      "net_a": "I2C_SDA",
+      "net_b": "3V3",
+      "min_ohms": 2500,
+      "max_ohms": 10000,
+      "citation": {
+        "page": "20",
+        "quote": "The recommended value for the pullup resistors is 5-KΩ.",
+        "section": "7.2.1 Design Requirements"
+      },
+      "note": "Datasheet recommends 5000 ohms for SDA. The accepted window 2500-10000 is a REVIEW PROPOSAL derived from that single value, not a documented range. Confirm before vetting."
+    },
+    {
+      "id": "tmp102-drl-pullup-u1-3",
+      "type": "resistor_between",
+      "net_a": "ALERT_N",
+      "net_b": "3V3",
+      "min_ohms": 2500,
+      "max_ohms": 10000,
+      "citation": {
+        "page": "20",
+        "quote": "The recommended value for the pullup resistors is 5-KΩ.",
+        "section": "7.2.1 Design Requirements"
+      },
+      "note": "Datasheet recommends 5000 ohms for ALERT. The accepted window 2500-10000 is a REVIEW PROPOSAL derived from that single value, not a documented range. Confirm before vetting."
+    }
+  ]
+}

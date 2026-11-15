@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "kind": "boardproof-package",
+  "package": {
+    "id": "tmp102aidrlr-tmp102aidrlr",
+    "part": "TMP102AIDRLR",
+    "package": "SOT-5X3 (DRL)",
+    "status": "vetted",
+    "reviewed_by": "Bhuvi (read DRL0006A, p.30)",
+    "reviewed_at": "2026-11-14T03:09:17+00:00",
+    "source": {
+      "document": "tmp102aidrlr.pdf",
+      "sha256": "c9da6620ef95f75ce94372f670a84d168e05922dd32cebfaa6517083f15ebfaf",
+      "url": "file:///Users/bhuvanprakash/Documents/boardproof_mvp/datasheets/tmp102.pdf"
+    },
+    "extracted_by": {
+      "engine": "gemini:gemini-2.5-flash",
+      "at": "2026-11-14T03:09:03+00:00"
+    }
+  },
+  "geometry": {
+    "pin_count": 6,
+    "pitch_mm": 0.5,
+    "body_w_mm": 1.6,
+    "body_h_mm": 1.2,
+    "pad_w_mm": 0.3,
+    "pad_h_mm": 0.2,
+    "thermal_pad": false,
+    "citation": {
+      "page": "30",
+      "quote": "4X 0.5"
+    }
+  },
+  "limits": {
+    "max_current_per_pin_a": null
+  },
+  "notes": [
+    "Nominal pad width (0.3 mm) and pad length (0.2 mm) are derived as the midpoint of the min/max ranges (0.2-0.4 mm and 0.1-0.3 mm respectively) shown on page 30, as explicit nominals were not provided for these dimensions.",
+    "Reviewer corrected body width to 1.2 mm (drawing shows 1.1-1.3 mm on p.30)."
+  ]
+}
