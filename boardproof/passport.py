@@ -337,3 +337,39 @@ def render(document: dict) -> str:
         " Verify every limit against the authoritative datasheet for the exact part number,"
         " package and operating conditions.</p></div></body></html>"
     )
+
+
+def _read_evidence(path: Path) -> dict | None:
+    if not path.is_file():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+
+
+def build_document(out_dir: Path, revision: str, *, report: dict | None = None,
+                   config: Path | None = None, include_board: bool = True) -> dict:
+    out_dir = Path(out_dir)
+    report = report or _read_evidence(out_dir / "report.json")
+    if report is None:
+        raise ValueError("Run a circuit check before building a passport")
+
+    def evidence(name: str) -> dict | None:
+        data = _read_evidence(out_dir / name)
+        if config is not None and data and data.get("config") != str(config):
+            return None
+        return data
+
+    pcb = evidence("pcb-check.json") if include_board else None
+    rules = evidence("redteam.json") if include_board else None
+    layout = evidence("pcb-redteam.json") if include_board else None
+    document = build(report, revision, None, rules)
+    document["layout_redteam"] = layout
+    if pcb:
+        document["pcb"] = pcb
+        svg = (out_dir / Path(pcb.get("svg") or "").name).resolve()
+        if svg.parent == out_dir.resolve() and svg.is_file():
+            document["pcb_svg"] = svg.read_text(encoding="utf-8")
+            document["pcb"]["inline_svg"] = True
+    return {"json": document, "html": render(document)}

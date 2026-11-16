@@ -76,6 +76,7 @@ h1 .muted{color:var(--ink3);font-weight:550}
 .status span{display:block;font:12px var(--sans);color:var(--ink4);margin-bottom:6px}
 .status strong{display:block;font:650 22px/1.15 var(--sans);letter-spacing:-.03em}
 .status strong.ok{color:var(--teal)}.status strong.bad{color:var(--red)}.status strong.warn{color:var(--amber)}
+.status strong.muted{color:var(--ink3)}
 .status em{display:block;font-style:normal;font:12.5px var(--mono);color:var(--ink3);margin-top:6px;
   overflow-wrap:anywhere}
 
@@ -369,7 +370,7 @@ FLOW = [
 ]
 
 
-def collect(directory: Path) -> dict:
+def collect(directory: Path, *, include_visuals: bool = True) -> dict:
     reports, passport, redteam, diffs, redteams = [], None, None, [], []
     designs, pcb_checks = [], []
     for path in sorted(directory.glob("*.json")):
@@ -395,7 +396,8 @@ def collect(directory: Path) -> dict:
         elif data.get("tool") == "BoardProof" and "findings" in data:
             reports.append((path, data))
     boards: list[dict] = []
-    for path in sorted(directory.glob("*.svg"), key=lambda p: p.stat().st_mtime, reverse=True):
+    svg_files = directory.glob("*.svg") if include_visuals else ()
+    for path in sorted(svg_files, key=lambda p: p.stat().st_mtime, reverse=True):
         try:
             markup = path.read_text(encoding="utf-8")
         except OSError:
@@ -419,7 +421,7 @@ def collect(directory: Path) -> dict:
     boards = demo + [b for b in boards if b not in demo]
     previews = {"schematic": "", "datasheets": []}
     preview_dir = directory / "preview"
-    if preview_dir.is_dir():
+    if include_visuals and preview_dir.is_dir():
         schematic = preview_dir / "schematic.svg"
         if schematic.is_file():
             previews["schematic"] = schematic.read_text(encoding="utf-8")
@@ -1461,7 +1463,8 @@ def render(found: dict, title: str = "BoardProof", studio: list[dict] | None = N
     redteam = redteam or ((found.get("redteams") or [None])[0])
     score = (redteam[1].get("score") or {}) if redteam else {}
     packs = latest.get("packs") or []
-    unverified = len(latest.get("unverified_scope") or [])
+    unverified_scope = latest.get("unverified_scope")
+    unverified = len(unverified_scope) if isinstance(unverified_scope, list) else None
 
     cards = []
     for path, data in reports:
@@ -1548,18 +1551,24 @@ def render(found: dict, title: str = "BoardProof", studio: list[dict] | None = N
         {str(p.get("reviewed_by") or "") for p in packs} - {""})) or "no reviewer"
     findings_n = len(latest.get("findings") or [])
     gaps_n = score.get("gaps", 0)
+    fault_count = score.get("faults", score.get("targeted", 0))
+    fault_result = f"{score.get('caught', 0)}/{fault_count}" if redteam else "—"
+    fault_note = (f"{gaps_n} gap{'s' if gaps_n != 1 else ''} declared"
+                  if redteam else "No red-team run")
+    unverified_result = str(unverified) if unverified is not None else "—"
+    unverified_note = "outside this pass" if unverified is not None else "Scope not recorded"
     tiles = (
         f'<div><span>Verdict</span><strong class="'
         f'{"bad" if latest.get("status") == "failed" else "ok"}">'
         f'{html.escape(str(latest.get("status", "none")).capitalize())}</strong>'
         f'<em>{findings_n} finding{"s" if findings_n != 1 else ""}</em></div>'
-        f'<div><span>Faults</span><strong class="ok">'
-        f'{score.get("caught", 0)}/{score.get("faults", score.get("targeted", 0))}</strong>'
-        f'<em>{gaps_n} gap{"s" if gaps_n != 1 else ""} declared</em></div>'
+        f'<div><span>Faults</span><strong class="{"ok" if redteam else "muted"}">'
+        f'{fault_result}</strong>'
+        f'<em>{html.escape(fault_note)}</em></div>'
         f'<div><span>Packs</span><strong>{len(packs)}</strong>'
         f'<em>{html.escape(reviewer_names)}</em></div>'
-        f'<div><span>Unverified</span><strong class="warn">{unverified}</strong>'
-        "<em>outside this pass</em></div>"
+        f'<div><span>Unverified</span><strong class="warn">{unverified_result}</strong>'
+        f'<em>{html.escape(unverified_note)}</em></div>'
     )
     flow = "".join(
         f'<div class="wstep"><span class="wn">{num}</span><b>{name}</b>'

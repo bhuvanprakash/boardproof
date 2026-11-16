@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+from tempfile import TemporaryDirectory
 import zipfile
 from pathlib import Path
 
@@ -22,10 +23,17 @@ def export(board_path: Path, out_dir: Path) -> dict:
     if not board_path.is_file():
         return {"available": False, "note": f"board not found: {board_path}"}
 
-    gerbers = out_dir / "gerbers"
-    if gerbers.exists():
-        shutil.rmtree(gerbers, ignore_errors=True)
-    gerbers.mkdir(parents=True, exist_ok=True)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    with TemporaryDirectory(prefix=".gerber-", dir=out_dir) as scratch:
+        try:
+            return _export(cli, board_path, out_dir, Path(scratch))
+        except OSError as exc:
+            return {"available": True, "error": f"could not save Gerbers: {exc}"}
+
+
+def _export(cli: str, board_path: Path, out_dir: Path, scratch: Path) -> dict:
+    gerbers = scratch / "layers"
+    gerbers.mkdir()
     commands = [
         [cli, "pcb", "export", "gerbers", "--output", str(gerbers) + "/", str(board_path)],
         [cli, "pcb", "export", "drill", "--format", "excellon",
@@ -44,9 +52,15 @@ def export(board_path: Path, out_dir: Path) -> dict:
     if not files:
         return {"available": True, "error": "kicad-cli produced no files"}
     archive = out_dir / (board_path.stem + "-gerbers.zip")
-    with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as bundle:
+    pending = scratch / archive.name
+    with zipfile.ZipFile(pending, "w", zipfile.ZIP_DEFLATED) as bundle:
         for path in files:
             bundle.write(path, path.name)
+    layers = out_dir / "gerbers"
+    layers.mkdir(exist_ok=True)
+    for path in files:
+        shutil.copy2(path, layers / path.name)
+    pending.replace(archive)
     return {
         "available": True,
         "archive": archive.name,

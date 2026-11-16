@@ -615,15 +615,9 @@ def build_board(design: Design, width: float | None, height: float | None, title
 
 
 def write_board(board: Board, out: Path, svg_out: Path | None = None) -> None:
-    import json
-
-    from .pcbview import board_model, render_2d, render_3d
+    from .pcbview import write_previews
 
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(write_kicad(board), encoding="utf-8")
     if svg_out:
-        svg_out.parent.mkdir(parents=True, exist_ok=True)
-        svg_out.write_text(render_2d(board), encoding="utf-8")
-        svg_out.with_name(svg_out.stem + "-3d.svg").write_text(render_3d(board), encoding="utf-8")
-        svg_out.with_name(svg_out.stem + "-model.json").write_text(
-            json.dumps(board_model(board), separators=(",", ":")) + "\n", encoding="utf-8")
+        write_previews(board, svg_out)

@@ -5,11 +5,10 @@ this package, called with paths that were discovered inside the workspace.
 """
 from __future__ import annotations
 
-import io
 import json
+import os
 import threading
 import time
-from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
 from .checks import run_checks
@@ -27,6 +26,7 @@ ACTION_HELP = {
     "prove": "Full journey: check → design → pcb-check → red team → passport",
     "design": "Generate the editable KiCad candidate + preview",
     "pcb": "Verify the newest .kicad_pcb against the schematic",
+    "gerbers": "Export the selected board's Gerbers and drill files",
     "redteam": "Inject faults and score the rule set",
     "passport": "Rebuild the Manufacturing Preflight Passport",
     "refresh": "Rescan the workspace and rebuild this dashboard",
@@ -35,9 +35,14 @@ ACTION_HELP = {
 _LOCK = threading.Lock()
 
 
-def discover_configs(root: Path, limit: int = 12) -> list[dict]:
+def discover_configs(root: Path, limit: int | None = 12) -> list[dict]:
     configs: list[dict] = []
-    for path in sorted(root.rglob("boardproof*.json")):
+    paths: set[Path] = set()
+    for directory, folders, files in os.walk(root):
+        folders[:] = [name for name in folders if name not in {".venv", ".next", "node_modules", ".git", "artifacts"}]
+        paths.update(Path(directory) / name for name in files
+                     if name.endswith(".json") and (name.startswith("boardproof") or name.endswith(".boardproof.json")))
+    for path in sorted(paths):
         if any(part in {".venv", "node_modules", ".git", "artifacts"} for part in path.parts):
             continue
         try:
@@ -53,7 +58,7 @@ def discover_configs(root: Path, limit: int = 12) -> list[dict]:
             "packs": len(data.get("packs") or []),
             "packages": len(data.get("packages") or []),
         })
-        if len(configs) >= limit:
+        if limit is not None and len(configs) >= limit:
             break
     configs.sort(key=lambda c: (-c["packages"], -c["packs"], c["path"]))
     return configs
@@ -64,51 +69,19 @@ def newest_board(out_dir: Path) -> Path | None:
     return boards[0] if boards else None
 
 
-def _build_from_upload(root: Path, out_dir: Path, upload: dict) -> dict:
-    """After an upload: generate the board, render both views, export Gerbers."""
-    from .gerber import export as export_gerbers
-
-    log: list[str] = []
-    config = root / upload["config"]
-    try:
-        spec, _raw, design = load_reviewed(config, True)
-        findings = run_checks(design, spec, config)
-        blocking = [f for f in findings if f.severity == "error"]
-        if blocking:
-            return {"board": None, "downloads": [],
-                    "log": log + [f"board not generated: {len(blocking)} blocking finding(s); "
-                                  "this upload is a draft with warning-severity rules only"]}
-        board, report = build_board(design, None, None,
-                                    title=Path(upload["netlist"]).stem, route=False)
-        stem = Path(upload["netlist"]).stem
-        board_path = out_dir / f"{stem}.kicad_pcb"
-        write_board(board, board_path, out_dir / f"{stem}.svg")
-        pcb = check_board(board_path, design, packages=[], net_currents={})
-        gerbers = export_gerbers(board_path, out_dir)
-        log.append(f"board generated: {report['board']['width_mm']}×"
-                   f"{report['board']['height_mm']} mm, {report['board']['footprints']} footprints")
-        log.append("2D and 3D renders written")
-        log.append(f"Gerbers: {gerbers.get('archive') or gerbers.get('note') or gerbers.get('error')}")
-        downloads = [
-            {"label": "KiCad board", "file": board_path.name},
-            {"label": "2D view", "file": f"{stem}.svg"},
-            {"label": "3D view", "file": f"{stem}-3d.svg"},
-        ]
-        if gerbers.get("archive"):
-            downloads.append({"label": "Gerbers (zip)", "file": gerbers["archive"]})
-        return {"board": board_path.name, "downloads": downloads, "log": log,
-                "pcb_status": pcb["status"], "gerbers": gerbers}
-    except Exception as exc:  # noqa: BLE001 - surfaced in the browser
-        return {"board": None, "downloads": [],
-                "log": log + [f"board generation failed: {type(exc).__name__}: {exc}"]}
+def selected_board(out_dir: Path, name: str | None) -> Path | None:
+    if not name or Path(name).name != name or not name.endswith(".kicad_pcb"):
+        return None
+    path = (out_dir / name).resolve()
+    return path if path.parent == out_dir.resolve() and path.name == name and path.is_file() else None
 
 
-def state(root: Path, out_dir: Path) -> dict:
-    found = collect(out_dir)
+def state(root: Path, out_dir: Path, *, config_limit: int | None = 12) -> dict:
+    found = collect(out_dir, include_visuals=False)
     board = newest_board(out_dir)
     return {
         "tool": "BoardProof",
-        "configs": discover_configs(root),
+        "configs": discover_configs(root, config_limit),
         "board": str(board) if board else None,
         "artifacts": {
             "reports": [p.name for p, _ in found["reports"]],
@@ -123,15 +96,9 @@ def state(root: Path, out_dir: Path) -> dict:
     }
 
 
-def _capture(fn) -> tuple[dict, list[str]]:
-    buffer = io.StringIO()
-    with redirect_stdout(buffer), redirect_stderr(buffer):
-        payload = fn()
-    return payload or {}, [line for line in buffer.getvalue().splitlines() if line.strip()]
-
-
 def run_action(root: Path, out_dir: Path, action: str, config: str | None,
-               revision: str = "") -> dict:
+               revision: str = "", *, board: str | None = None,
+               render_dashboard: bool = True) -> dict:
     if action not in ACTION_HELP:
         return {"ok": False, "code": 2, "log": [f"unknown action {action!r}"]}
     root, out_dir = Path(root), Path(out_dir)
@@ -139,9 +106,23 @@ def run_action(root: Path, out_dir: Path, action: str, config: str | None,
     started = time.time()
 
     if action == "refresh":
+        if not render_dashboard:
+            return {"ok": True, "code": 0, "log": ["Workspace refreshed"]}
         (out_dir / "index.html").write_text(render(collect(out_dir)), encoding="utf-8")
         return {"ok": True, "code": 0, "seconds": round(time.time() - started, 2),
                 "log": ["rescanned workspace", f"dashboard rebuilt at {out_dir / 'index.html'}"]}
+
+    if action == "gerbers":
+        from .gerber import export
+
+        board_path = selected_board(out_dir, board)
+        if board_path is None:
+            return {"ok": False, "code": 2, "log": ["Select a board from the workspace"]}
+        with _LOCK:
+            exported = export(board_path, out_dir)
+        archive = exported.get("archive")
+        return {"ok": bool(archive), "code": 0 if archive else 1,
+                "log": [f"Wrote {archive}" if archive else exported.get("note") or exported["error"]]}
 
     if not config:
         return {"ok": False, "code": 2, "log": ["pick a configuration first"]}
@@ -165,9 +146,11 @@ def run_action(root: Path, out_dir: Path, action: str, config: str | None,
                 payload = {"ok": code == 0, "code": code}
 
             elif action == "prove":
-                result = run_prove(candidate, out_dir, "44x52mm", False, revision, "offline", True)
+                result = run_prove(candidate, out_dir, "44x52mm", False, revision, "offline", True,
+                                   dashboard=render_dashboard)
                 log = [f"[{s['status'].upper()}] {s['step']}: {s['detail']}" for s in result["steps"]]
-                payload = {"ok": result["exit_code"] == 0, "code": result["exit_code"]}
+                payload = {"ok": result["exit_code"] == 0, "code": result["exit_code"],
+                           "board": result["board"]}
 
             elif action == "design":
                 spec, _raw, design = load_reviewed(candidate, False)
@@ -191,11 +174,13 @@ def run_action(root: Path, out_dir: Path, action: str, config: str | None,
                        f"on {report['board']['width_mm']:g}x{report['board']['height_mm']:g} mm",
                        f"routing: {'attempted' if report['routing']['attempted'] else 'not attempted'}",
                        f"wrote {board_path.name} and {board_path.with_suffix('.svg').name}"]
-                payload = {"ok": True, "code": 0}
+                payload = {"ok": True, "code": 0, "board": board_path.name}
 
             elif action == "pcb":
                 spec, _raw, design = load_reviewed(candidate, False)
-                board_path = newest_board(out_dir)
+                board_path = selected_board(out_dir, board) if board else newest_board(out_dir)
+                if board and board_path is None:
+                    return {"ok": False, "code": 2, "log": ["Select a board from the workspace"]}
                 if board_path is None:
                     return {"ok": False, "code": 2, "log": ["no .kicad_pcb in the artifacts directory"]}
                 packages = []
@@ -229,9 +214,11 @@ def run_action(root: Path, out_dir: Path, action: str, config: str | None,
                 payload = {"ok": score["gaps"] == 0, "code": 0 if score["gaps"] == 0 else 1}
 
             elif action == "passport":
-                from .provepkg import build_document
+                from .passport import build_document
 
-                document = build_document(out_dir, revision or candidate.stem)
+                report, _, _ = analyse(candidate, True, "offline", None, None, False)
+                document = build_document(out_dir, revision or candidate.stem,
+                                          report=report, config=candidate)
                 (out_dir / "passport.html").write_text(document["html"], encoding="utf-8")
                 (out_dir / "passport.json").write_text(json.dumps(document["json"], indent=2) + "\n",
                                                        encoding="utf-8")
@@ -244,7 +231,8 @@ def run_action(root: Path, out_dir: Path, action: str, config: str | None,
             else:  # pragma: no cover - guarded above
                 return {"ok": False, "code": 2, "log": ["unhandled action"]}
 
-            (out_dir / "index.html").write_text(render(collect(out_dir)), encoding="utf-8")
+            if render_dashboard:
+                (out_dir / "index.html").write_text(render(collect(out_dir)), encoding="utf-8")
         except Exception as exc:  # noqa: BLE001 - surfaced to the browser, never swallowed
             return {"ok": False, "code": 2,
                     "log": [f"{type(exc).__name__}: {exc}"], "seconds": round(time.time() - started, 2)}

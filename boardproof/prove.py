@@ -16,14 +16,15 @@ from .report import write_reports
 from .pcb import render_svg
 from .pcb_redteam import run_pcb_redteam
 from .pcbcheck import check_board
-from .provepkg import build_document
+from .passport import build_document
 from .redteam import run_redteam
 
 STEPS = ("check", "design", "pcb-check", "red-team", "layout-red-team", "passport")
 
 
 def run_prove(config: Path, out_dir: Path, outline: str = "44x48mm", route: bool = True,
-              revision: str = "", engine: str = "offline", explain: bool = True) -> dict:
+              revision: str = "", engine: str = "offline", explain: bool = True,
+              *, dashboard: bool = True) -> dict:
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     width, height = parse_outline(outline)
@@ -125,7 +126,8 @@ def run_prove(config: Path, out_dir: Path, outline: str = "44x48mm", route: bool
                f"{layout['score']['caught']}/{layout['score']['faults']} layout faults caught")
 
     # 6. the artifact a human signs
-    document = build_document(out_dir, revision or f"{config.stem} @ {width:g}x{height:g} mm")
+    document = build_document(out_dir, revision or f"{config.stem} @ {width:g}x{height:g} mm",
+                              report=data, config=config, include_board=design_board is not None)
     (out_dir / "passport.html").write_text(document["html"], encoding="utf-8")
     (out_dir / "passport.json").write_text(json.dumps(document["json"], indent=2) + "\n",
                                            encoding="utf-8")
@@ -133,7 +135,9 @@ def run_prove(config: Path, out_dir: Path, outline: str = "44x48mm", route: bool
            f"{document['json']['counts']['critical']} critical, "
            f"{document['json']['counts']['unverified']} unverified")
 
-    from .dashboard import collect, render as render_dashboard
+    if dashboard:
+        from .dashboard import collect, render as render_dashboard
 
-    (out_dir / "index.html").write_text(render_dashboard(collect(out_dir)), encoding="utf-8")
-    return {"steps": log, "exit_code": exit_code, "out": str(out_dir)}
+        (out_dir / "index.html").write_text(render_dashboard(collect(out_dir)), encoding="utf-8")
+    return {"steps": log, "exit_code": exit_code, "out": str(out_dir),
+            "board": "board.kicad_pcb" if design_board is not None else None}

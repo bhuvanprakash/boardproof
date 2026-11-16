@@ -5,7 +5,6 @@ generated here can block a build until a human promotes it.
 """
 from __future__ import annotations
 
-import json
 import re
 from pathlib import Path
 
@@ -83,7 +82,7 @@ def _downloads(stem: str, gerbers: dict) -> list[dict]:
 def _layout_from_pcb(out_dir: Path, filename: str, content: bytes, note: str = "") -> dict:
     from .gerber import export as export_gerbers
     from .pcb import read_kicad
-    from .pcbview import board_model, render_2d, render_3d
+    from .pcbview import write_previews
 
     text = content.decode("utf-8", errors="replace")
     if "(kicad_pcb" not in text:
@@ -92,11 +91,7 @@ def _layout_from_pcb(out_dir: Path, filename: str, content: bytes, note: str = "
     stem = Path(_safe_name(filename)).stem or "board"
     board_path = out_dir / f"{stem}.kicad_pcb"
     board_path.write_text(text, encoding="utf-8")
-    svg = out_dir / f"{stem}.svg"
-    svg.write_text(render_2d(board), encoding="utf-8")
-    svg.with_name(f"{stem}-3d.svg").write_text(render_3d(board), encoding="utf-8")
-    svg.with_name(f"{stem}-model.json").write_text(
-        json.dumps(board_model(board), separators=(",", ":")) + "\n", encoding="utf-8")
+    write_previews(board, out_dir / f"{stem}.svg")
     gerbers = export_gerbers(board_path, out_dir)
     log = [
         f"layout {stem}.kicad_pcb — {len(board.footprints)} footprints, "
@@ -241,9 +236,43 @@ def _from_intent(root: Path, out_dir: Path, filename: str, brief: str, kind: str
         raise UploadError(f"layout failed: {type(exc).__name__}: {exc}") from exc
 
 
-def _emit_from_netlist(root: Path, out_dir: Path, result: dict) -> dict:
-    from .studio import _build_from_upload
+def _build_from_upload(root: Path, out_dir: Path, upload: dict) -> dict:
+    """After an upload: generate the board, render both views, export Gerbers."""
+    from .cli_support import load_reviewed
+    from .design import build_board, write_board
+    from .pcbcheck import check_board
+    from .gerber import export as export_gerbers
 
+    log: list[str] = []
+    config = root / upload["config"]
+    try:
+        spec, _raw, design = load_reviewed(config, True)
+        findings = run_checks(design, spec, config)
+        blocking = [f for f in findings if f.severity == "error"]
+        if blocking:
+            return {"board": None, "downloads": [],
+                    "log": log + [f"board not generated: {len(blocking)} blocking finding(s); "
+                                  "this upload is a draft with warning-severity rules only"]}
+        board, report = build_board(design, None, None,
+                                    title=Path(upload["netlist"]).stem, route=False)
+        stem = Path(upload["netlist"]).stem
+        board_path = out_dir / f"{stem}.kicad_pcb"
+        write_board(board, board_path, out_dir / f"{stem}.svg")
+        pcb = check_board(board_path, design, packages=[], net_currents={})
+        gerbers = export_gerbers(board_path, out_dir)
+        log.append(f"board generated: {report['board']['width_mm']}×"
+                   f"{report['board']['height_mm']} mm, {report['board']['footprints']} footprints")
+        log.append("2D and 3D renders written")
+        log.append(f"Gerbers: {gerbers.get('archive') or gerbers.get('note') or gerbers.get('error')}")
+        downloads = _downloads(stem, gerbers)
+        return {"board": board_path.name, "downloads": downloads, "log": log,
+                "pcb_status": pcb["status"], "gerbers": gerbers}
+    except Exception as exc:  # noqa: BLE001 - surfaced in the browser
+        return {"board": None, "downloads": [],
+                "log": log + [f"board generation failed: {type(exc).__name__}: {exc}"]}
+
+
+def _emit_from_netlist(root: Path, out_dir: Path, result: dict) -> dict:
     built = _build_from_upload(root, out_dir, result)
     result["board"] = built.get("board")
     result["downloads"] = built.get("downloads") or []
@@ -258,7 +287,8 @@ def _emit_from_netlist(root: Path, out_dir: Path, result: dict) -> dict:
 
 
 def onboard(root: Path, out_dir: Path, filename: str, content: bytes,
-            brief: str = "", kind: str = "", engine: str = "auto") -> dict:
+            brief: str = "", kind: str = "", engine: str = "auto",
+            fetch_datasheets: bool = True) -> dict:
     root, out_dir = Path(root), Path(out_dir)
     if len(content) > MAX_BYTES:
         raise UploadError(f"file is larger than {MAX_BYTES // (1024 * 1024)} MB")
@@ -306,14 +336,17 @@ def onboard(root: Path, out_dir: Path, filename: str, content: bytes,
         seen.add(part)
         entry = {"part": part, "refs": [], "datasheet": None, "document": "",
                  "status": "", "error": ""}
-        try:
-            record = datasheets.fetch(part, root / "datasheets")
-            entry.update({"datasheet": record.get("url") or record.get("path"),
-                          "status": record.get("status", "cached"),
-                          "sha256": (record.get("sha256") or "")[:16],
-                          "document": record.get("path")})
-        except datasheets.DatasheetError as exc:
-            entry.update({"status": "not found", "error": str(exc)})
+        if fetch_datasheets:
+            try:
+                record = datasheets.fetch(part, root / "datasheets")
+                entry.update({"datasheet": record.get("url") or record.get("path"),
+                              "status": record.get("status", "cached"),
+                              "sha256": (record.get("sha256") or "")[:16],
+                              "document": record.get("path")})
+            except datasheets.DatasheetError as exc:
+                entry.update({"status": "not found", "error": str(exc)})
+        else:
+            entry["status"] = "not requested"
         parts.append(entry)
     for entry in parts:
         entry["refs"] = sorted(c.ref for c in design.components.values()

@@ -5,7 +5,9 @@ picture can never disagree with the geometry. No raster, no JS, no network.
 """
 from __future__ import annotations
 
+import json
 import math
+from pathlib import Path
 
 from .pcb import Board, FootprintInst
 
@@ -583,3 +585,15 @@ def board_model(board: Board, thickness: float = 1.6) -> dict:
 
 def render_pair(board: Board) -> tuple[str, str]:
     return render_2d(board), render_3d(board)
+
+
+def write_previews(board: Board, svg: Path) -> None:
+    """Write the three companion files for an imported or generated board."""
+    top, iso = render_pair(board)
+    model = json.dumps(board_model(board), separators=(",", ":")) + "\n"
+    svg.parent.mkdir(parents=True, exist_ok=True)
+    for path, content in (
+        (svg, top), (svg.with_name(svg.stem + "-3d.svg"), iso),
+        (svg.with_name(svg.stem + "-model.json"), model),
+    ):
+        path.write_text(content, encoding="utf-8")
