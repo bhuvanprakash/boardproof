@@ -14,9 +14,11 @@ dependencies = []
 [project.optional-dependencies]
 ai = ["google-genai>=1.20"]
 dev = ["pytest>=7"]
+api = ["fastapi>=0.115", "uvicorn>=0.30"]
 
 [project.scripts]
 boardproof = "boardproof.cli:main"
+boardproof-api = "boardproof.api:main"
 
 [tool.setuptools.packages.find]
 include = ["boardproof*"]
