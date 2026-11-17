@@ -156,6 +156,51 @@ pads, board size, copper, the `pcb-check` verdict and the checks that passed —
 *land pattern vs datasheet* and *IPC-2221 current capacity*. When the router declined, the panel
 says **routing not attempted**; it never shows a green board that was not verified.
 
+## Web MVP API
+
+The optional FastAPI service exposes the same Python onboarding and check engine to a web client:
+
+```sh
+pip install -e '.[api]'
+BOARDPROOF_ROOT=. BOARDPROOF_DIR=artifacts boardproof-api
+```
+
+It serves `GET /healthz`, `GET /api/state`, `GET /api/artifacts/{filename}`,
+`POST /api/upload`, and `POST /api/run`;
+interactive API docs are at `/docs`. Upload JSON accepts `filename` plus `content_b64` (base64)
+or UTF-8 `content`, and optional `kind`, `brief`, and `fetch_datasheets` (false by default). Checks keep BoardProof's existing exit-code
+meaning: a completed check with findings returns its result, while invalid input/configuration is
+an HTTP 422. The API uses one local workspace and filesystem; it is not a multi-user service.
+
+For an external bind, set `BOARDPROOF_API_TOKEN`, `BOARDPROOF_API_HOST=0.0.0.0`, and
+`BOARDPROOF_WEB_ORIGINS` to the exact frontend origin. Keep the bearer token on the Next.js server;
+do not expose it in browser code.
+
+The Next.js MVP lives in `web/` and proxies API calls server-side:
+
+```sh
+# Terminal 1, repository root
+pip install -e '.[api]'
+BOARDPROOF_ROOT=. BOARDPROOF_DIR=artifacts boardproof-api
+
+# Terminal 2
+cd web
+npm ci
+cp .env.example .env.local
+npm run dev
+```
+
+Open `http://localhost:3000`. Import a netlist or KiCad board, or select an example configuration
+and click **Run preflight**. Use the sidebar to inspect 2D and rotatable 3D previews, review circuit and
+layout evidence, and download the generated files. The web app reads previews from
+`BOARDPROOF_DIR` through the API. Datasheet lookup is opt-in, and importing a brief, photo, or
+schematic uses Gemini when configured.
+
+On Overview, **Demo 1** opens the Arduino-compatible Jeden Uno in the 2D and 3D viewers.
+Select **Import demo board** to bring the KiCad layout into your workspace and export Gerbers.
+**Demo 2** checks the faulty TMP102 Rev B and runs the corrected Rev C through board generation
+and verification. Use the board selector to switch layouts.
+
 ## Demo surface
 
 ```sh
