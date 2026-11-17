@@ -1,18 +1,65 @@
-# BoardProof · hardware CI starter v0.2
+<p align="center">
+  <br>
+  <strong>BoardProof</strong><br>
+  <sub>hardware CI starter v0.2</sub>
+</p>
 
-**GitHub Actions for hardware designs.** A conservative tool for checking *known* electrical and firmware constraints against a real EasyEDA Pro netlist **before** PCB fabrication.
+<p align="center">
+  GitHub Actions for hardware designs.<br>
+  Checks <em>reviewed</em> electrical and firmware rules against a real EasyEDA Pro netlist
+  <strong>before</strong> PCB fabrication.
+</p>
+
+<p align="center">
+  <a href="https://github.com/bhuvanprakash/boardproof">github.com/bhuvanprakash/boardproof</a>
+</p>
+
+| | |
+| --- | --- |
+| Version | 0.2.0 |
+| License | MIT |
+| Python | 3.10+ |
+| Node | 20.9+ (Next.js UI) |
+| UI | Next.js frontend + Python API |
 
 Gemini may **propose** a constraint. It may never **enforce** one. That boundary is code, not a prompt. A green check means the configured rules passed. It is not a claim of electrical correctness, EMC compliance, or readiness to manufacture.
 
-Repo: https://github.com/bhuvanprakash/boardproof
+The demo uses a fictional MCU and sensor. It is **not** an ESP32 schematic or a manufacturing-ready circuit. No silicon pinouts or datasheet values are implied by the demo.
 
-The demo deliberately contains a fictional MCU and sensor. It is **not** an ESP32 schematic or a manufacturing-ready circuit. No silicon pinouts or datasheet values are implied by the demo.
+---
+
+## Contents
+
+1. [Start the web app](#start-the-web-app)
+2. [Install and run the CLI demo](#install-and-run-the-cli-demo)
+3. [What the broken demo catches](#what-the-broken-demo-catches)
+4. [How a rule becomes enforceable](#how-a-rule-becomes-enforceable)
+5. [Commands](#commands)
+6. [Red team](#does-the-rule-set-actually-work-red-team)
+7. [Revision gate](#revision-gate-not-a-backlog)
+8. [Speed](#speed)
+9. [Onboarding a real board](#onboarding-a-real-board)
+10. [Gemini datasheet proposals](#optional-gemini-datasheet-proposals)
+11. [Manufacturing Preflight Passport](#manufacturing-preflight-passport)
+12. [Design and prove](#design-and-prove-generate-a-board-then-verify-the-file)
+13. [Datasheet-driven layout](#datasheet-driven-layout-verification)
+14. [Studio dashboard](#studio-run-it-from-the-dashboard)
+15. [Demo surface](#demo-surface)
+16. [Web app API](#web-app-api-details)
+17. [Judges: 90 seconds](#demo-for-judges-90-seconds)
+18. [Architecture](#architecture)
+19. [Limits](#what-this-reads-and-what-it-does-not)
+
+---
 
 ## Start the web app
 
-The UI is a **Next.js** app in `web/`. It talks to a **Python** backend (`boardproof-api`). Run both. Leave them running.
+Two processes. Leave both running.
 
-Needs Python 3.10+ and Node.js 20.9+.
+| Process | Where | Port |
+| --- | --- | --- |
+| Backend | Python FastAPI (`boardproof-api`) | http://127.0.0.1:8000 |
+| Frontend | Next.js app in `web/` | http://localhost:3000 |
 
 ### 1. Backend (Python API)
 
@@ -25,7 +72,8 @@ python -m pip install -e '.[api]'
 BOARDPROOF_ROOT=. BOARDPROOF_DIR=artifacts boardproof-api
 ```
 
-This listens on http://127.0.0.1:8000. Check http://127.0.0.1:8000/healthz and the interactive docs at http://127.0.0.1:8000/docs.
+Health: http://127.0.0.1:8000/healthz  
+Docs: http://127.0.0.1:8000/docs
 
 | Variable | Default | What it does |
 | --- | --- | --- |
@@ -50,7 +98,7 @@ cp .env.example .env.local
 npm run dev
 ```
 
-Open http://localhost:3000. The Next.js server proxies `/api/*` to the Python backend, so the browser never holds `BOARDPROOF_API_TOKEN`.
+Open http://localhost:3000. Next.js proxies `/api/*` to the Python backend, so the browser never holds `BOARDPROOF_API_TOKEN`.
 
 `web/.env.local`:
 
@@ -71,6 +119,8 @@ If you set a token on the backend, put the **same** value in `web/.env.local`. D
 On Overview: **Demo 1** is the Jeden Uno (2D / 3D). **Import demo board** loads that KiCad layout and can export Gerbers. **Demo 2** is TMP102 Rev B (broken) then Rev C (fixed). Use **Run preflight** after you pick a board. Datasheet lookup is opt-in.
 
 CLI-only checks (no browser) are in the next section. Studio / `boardproof serve` on port 8080 is a separate stdlib dashboard, not the Next.js app.
+
+---
 
 ## Install and run the CLI demo
 
@@ -95,15 +145,15 @@ boardproof check --config examples/demo/boardproof.pack.json --explain --engine 
 
 Open `artifacts/broken.html` in a browser. Every finding carries the datasheet page, the quoted text, the pack id and the human who vetted it. GitHub Actions CI is at `.github/workflows/boardproof.yml`. It runs on pushes and pull requests and uploads artifacts.
 
-Exit codes:
-
-| Code | Meaning |
-| --- | --- |
-| 0 | Configured rules passed |
-| 1 | Findings (at least one error) |
-| 2 | Cannot verify (missing/malformed input, or a pack is still `proposed`) |
+| Exit | Meaning |
+| ---: | --- |
+| **0** | Configured rules passed |
+| **1** | Findings (at least one error) |
+| **2** | Cannot verify (missing/malformed input, or a pack is still `proposed`) |
 
 A missing or malformed input produces exit code **2**, never a false passing check. Unverifiable configured checks are errors by default; downgrade one rule with `"severity": "warning"`.
+
+---
 
 ## What the broken demo catches
 
@@ -117,20 +167,20 @@ A missing or malformed input produces exit code **2**, never a false passing che
 
 A voltage is not inferred from a net's name alone. It must be declared in `net_voltages`. Ranges are **not** derived from the model by default. Every asserted limit should be verified against an authoritative datasheet for the correct part number, package, and conditions.
 
+---
+
 ## How a rule becomes enforceable
 
-```
-datasheet.pdf  ->  boardproof infer  ->  *.propose.json   status=proposed  (untrusted)
-                                          |
-                              boardproof vet --reviewer <name>      the only promotion path
-                                          v
-                                    packs/*.json     status=vetted, reviewed_by, cited pages
-                                          |
-board.enet + firmware.h  ->  boardproof check  ->  findings + provenance
-                                          |
-                              boardproof check --explain            read-only prose
-                                          v
-                                    report.html / report.json
+```mermaid
+flowchart TD
+  PDF["datasheet.pdf"] --> Infer["boardproof infer"]
+  Infer --> Propose["*.propose.json  -  proposed, untrusted"]
+  Propose --> Vet["boardproof vet --reviewer"]
+  Vet --> Pack["packs/*.json  -  vetted, cited, reviewed_by"]
+  ENET["board.enet + firmware.h"] --> Check["boardproof check"]
+  Pack --> Check
+  Check --> Report["report.html / report.json"]
+  Check --> Explain["boardproof check --explain  -  read-only prose"]
 ```
 
 Three invariants are enforced structurally:
@@ -150,6 +200,8 @@ boardproof check --config examples/demo/boardproof.pack.json   # exits 2: pack i
 boardproof vet --proposal packs/u1.propose.json --reviewer "Your Name"
 boardproof check --config examples/demo/boardproof.pack.json --explain --html artifacts/pack.html
 ```
+
+---
 
 ## Commands
 
@@ -175,6 +227,8 @@ boardproof check --config examples/demo/boardproof.pack.json --explain --html ar
 | `boardproof package` | Infer / vet mechanical package specs from a drawing | Gemini (or offline) |
 | `boardproof-api` | FastAPI for the web app (`pip install -e '.[api]'`) | no |
 
+---
+
 ## Does the rule set actually work? (red team)
 
 `boardproof redteam` mutates a known-good design in ways a real engineer could: swap a supply rail, float a ground, delete a pull-up, drift a resistor value 100x, shift a firmware pin. Faults are derived from the rules themselves, so every targeted fault is relevant by construction.
@@ -191,6 +245,8 @@ RED TEAM  8/8 targeted faults caught (100%)  ·  1 blind spot(s)  ·  1 unverifi
 
 Blind spots are reported with the rule that would close them, and `--min-score 1.0` turns that into a CI gate: a rule that cannot be mutated is decoration.
 
+---
+
 ## Revision gate, not a backlog
 
 `boardproof diff --base base.json --head pr.json` separates **introduced** from **pre-existing** violations, so a hardware PR is blocked by the regression it adds, not by history:
@@ -200,6 +256,8 @@ BoardProof revision diff: 0 error(s) -> 5 error(s)  (passed -> failed)
   [NEW  ] MAX_VOLTAGE: U1.1 on 5V has declared 5 V; allowed 2.7 to 3.6 V  (regression)
   VERDICT: this revision introduces new hardware violations - blocked
 ```
+
+---
 
 ## Speed
 
@@ -213,6 +271,8 @@ BoardProof bench  20,000 components · 40,002 nets · 4,000 rules (best of 2)
 ```
 
 CI enforces a budget (`--max-checks-ms`) so this cannot silently regress.
+
+---
 
 ## Onboarding a real board
 
@@ -255,6 +315,8 @@ Create `boardproof.json` next to the export:
 
 All relative paths are resolved against the config file. `firmware_gpio` compares a simple numerical `#define` with the MCU pin's name (default `GPIO(\\d+)` or `IO(\\d+)`, or customize `pin_label_regex`). It is **not** a real compiler, does not follow `#include`, and does not understand alternate pin multiplexing or module pin numbering unless explicitly modeled.
 
+---
+
 ## Optional Gemini datasheet proposals
 
 ```sh
@@ -266,9 +328,17 @@ boardproof vet --proposal packs/U1.propose.json --reviewer "Your Name"   # after
 
 Review cited text, printed page numbers, exact package variant, and operating versus absolute-maximum ratings manually. **Do not import proposals directly into a blocking CI ruleset without verifying them.** This optional API integration was written against the Google Gen AI SDK but has **not** been live-tested with an API key in this environment.
 
+---
+
 ## Manufacturing Preflight Passport
 
-`boardproof passport` produces a printable one-pager (plus hashed JSON) that answers three questions in order: **what failed**, **what was actually verified and by whom**, and **what remains unverified**. The last section is mandatory. A PASS is only as wide as its scope list. Each passport carries a `passport_hash` over the netlist hash, the packs, the reviewers and the findings, so two revisions can be compared without trusting either file.
+`boardproof passport` produces a printable one-pager (plus hashed JSON) that answers three questions in order:
+
+1. what failed
+2. what was actually verified and by whom
+3. what remains unverified
+
+The last section is mandatory. A PASS is only as wide as its scope list. Each passport carries a `passport_hash` over the netlist hash, the packs, the reviewers and the findings, so two revisions can be compared without trusting either file.
 
 ```sh
 boardproof passport --config boardproof.json --revision "Rev B" \
@@ -276,9 +346,11 @@ boardproof passport --config boardproof.json --revision "Rev B" \
   --out artifacts/passport.html --json artifacts/passport.json
 ```
 
+---
+
 ## Design and prove: generate a board, then verify the file
 
-```
+```sh
 boardproof design   --config boardproof.json --outline 44x48mm --route --output board.kicad_pcb
 boardproof pcb-check --board board.kicad_pcb --config boardproof.json --require-routing
 ```
@@ -323,6 +395,8 @@ A broken circuit stops at step two (`design` refuses), so the pipeline cannot pr
   [BLOCK] passport  5 critical, 5 unverified
 ```
 
+---
+
 ## Datasheet-driven layout verification
 
 The strongest link in the chain: the layout is checked against the part's own drawing.
@@ -358,6 +432,8 @@ And it immediately caught a real error in our own library:
 
 The library had been guessed at 0.65 mm; TI's DRL0006A drawing says `4X 0.5`. Correcting it then exposed a second, deeper issue: a 0.6 mm via cannot fan out from a 0.5 mm-pitch row, so the router now **refuses to emit copper** rather than ship a short, and the pipeline falls back to a verified placement board that says so.
 
+---
+
 ## Studio: run it from the dashboard
 
 ```sh
@@ -372,6 +448,8 @@ Same process serves Cloud Run (`/healthz`, `PORT`). Opened as a plain file, the 
 
 `artifacts/*.svg` is rendered inline, on a grid backdrop, next to the facts that matter: footprints, pads, board size, copper, the `pcb-check` verdict and the checks that passed, including *land pattern vs datasheet* and *IPC-2221 current capacity*. When the router declined, the panel says **routing not attempted**. It never shows a green board that was not verified.
 
+---
+
 ## Demo surface
 
 ```sh
@@ -381,17 +459,31 @@ boardproof serve --dir artifacts       # http://localhost:8080 (+ /healthz for C
 
 `serve` is the stdlib HTTP server with a health endpoint, so the same artifacts run locally and on Cloud Run with `--port $PORT`. `docker build . && docker run -p 8080:8080 <image>` produces a container whose dashboard is already populated.
 
+---
+
 ## Web app API details
 
-Start steps, env vars, and Next.js scripts are under **Start the web app** above.
+Start steps, env vars, and Next.js scripts are under [Start the web app](#start-the-web-app).
 
-The FastAPI backend exposes the same Python onboarding and check engine the CLI uses. It serves `GET /healthz`, `GET /api/state`, `GET /api/artifacts/{filename}`, `POST /api/upload`, and `POST /api/run`. Interactive API docs are at `/docs`. Upload JSON accepts `filename` plus `content_b64` (base64) or UTF-8 `content`, and optional `kind`, `brief`, and `fetch_datasheets` (false by default). Checks keep BoardProof's existing exit-code meaning: a completed check with findings returns its result, while invalid input/configuration is an HTTP 422.
+The FastAPI backend exposes the same Python onboarding and check engine the CLI uses.
+
+| Method | Path |
+| --- | --- |
+| `GET` | `/healthz` |
+| `GET` | `/api/state` |
+| `GET` | `/api/artifacts/{filename}` |
+| `POST` | `/api/upload` |
+| `POST` | `/api/run` |
+
+Interactive API docs are at `/docs`. Upload JSON accepts `filename` plus `content_b64` (base64) or UTF-8 `content`, and optional `kind`, `brief`, and `fetch_datasheets` (false by default). Checks keep BoardProof's existing exit-code meaning: a completed check with findings returns its result, while invalid input/configuration is an HTTP 422.
 
 For an external bind, set `BOARDPROOF_API_TOKEN`, `BOARDPROOF_API_HOST=0.0.0.0`, and `BOARDPROOF_WEB_ORIGINS` to the exact frontend origin. Keep the bearer token in `web/.env.local` on the Next.js server; do not expose it in browser code.
 
 The Next.js app in `web/` proxies those routes server-side to `BOARDPROOF_API_URL`. Import a netlist or KiCad board, or select an example configuration and click **Run preflight**. Use the sidebar to inspect 2D and rotatable 3D previews, review circuit and layout evidence, and download the generated files. The web app reads previews from `BOARDPROOF_DIR` through the API. Datasheet lookup is opt-in, and importing a brief, photo, or schematic uses Gemini when configured.
 
 On Overview, **Demo 1** opens the Arduino-compatible Jeden Uno in the 2D and 3D viewers. Select **Import demo board** to bring the KiCad layout into your workspace and export Gerbers. **Demo 2** checks the faulty TMP102 Rev B and runs the corrected Rev C through board generation and verification. Use the board selector to switch layouts.
+
+---
 
 ## Demo for judges: 90 seconds
 
@@ -400,19 +492,23 @@ On Overview, **Demo 1** opens the Arduino-compatible Jeden Uno in the 2D and 3D 
 3. Show `firmware_good.h` to `firmware_broken.h`, where `LED_PIN` changed from 4 to 5; GitHub Actions blocks the PR.
 4. Explain that Gemini can convert datasheets into *reviewable candidate rules*. Deterministic checks, not AI opinions, decide whether CI fails.
 
+---
+
 ## Architecture
 
+```mermaid
+flowchart LR
+  ENET["EasyEDA Pro .enet"] --> IR["Normalized pin / net graph"]
+  FW["Firmware C defines"] --> IR
+  PACK["Reviewed rule JSON"] --> IR
+  IR --> ENG["Deterministic verification"]
+  ENG --> OUT["JSON + HTML report + GitHub annotations"]
+  PDF["PDF datasheet"] --> GEM["Gemini proposal - optional"]
+  GEM --> HUM["Human review"]
+  HUM --> PACK
 ```
-EasyEDA Pro .enet  ---+
-                      +-->  Normalized components/pin/net graph
-Firmware C defines  --+                    |
-Reviewed rule JSON  --+                    v
-                                 Deterministic verification
-                                           |
-                    JSON results + HTML report + GitHub annotations
 
-PDF datasheet  ->  Gemini proposal (optional)  ->  human review  ->  rule JSON
-```
+---
 
 ## What this reads, and what it does not
 
@@ -425,4 +521,6 @@ A green BoardProof check only means **the configured rules passed**. Continue to
 
 **Next technical milestones:** real EasyEDA Pro sample fixture compatibility; Standard Edition adapter; board-specific firmware parsers; electrical rules for shared-net drivers and power domains; bill-of-materials consistency; PR commenting; measured detection rates on deliberately fault-injected real boards.
 
-License: MIT. See `LICENSE`.
+---
+
+License: MIT. See [`LICENSE`](LICENSE).
