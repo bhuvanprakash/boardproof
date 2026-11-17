@@ -8,7 +8,71 @@ Repo: https://github.com/bhuvanprakash/boardproof
 
 The demo deliberately contains a fictional MCU and sensor. It is **not** an ESP32 schematic or a manufacturing-ready circuit. No silicon pinouts or datasheet values are implied by the demo.
 
-## Install and run the demo
+## Start the web app
+
+The UI is a **Next.js** app in `web/`. It talks to a **Python** backend (`boardproof-api`). Run both. Leave them running.
+
+Needs Python 3.10+ and Node.js 20.9+.
+
+### 1. Backend (Python API)
+
+From the repository root:
+
+```sh
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e '.[api]'
+BOARDPROOF_ROOT=. BOARDPROOF_DIR=artifacts boardproof-api
+```
+
+This listens on http://127.0.0.1:8000. Check http://127.0.0.1:8000/healthz and the interactive docs at http://127.0.0.1:8000/docs.
+
+| Variable | Default | What it does |
+| --- | --- | --- |
+| `BOARDPROOF_ROOT` | `.` | Repo / workspace root the API is allowed to read |
+| `BOARDPROOF_DIR` | `<root>/artifacts` | Where reports, SVGs, and Gerbers are written |
+| `BOARDPROOF_API_HOST` | `127.0.0.1` | Bind address. Use `0.0.0.0` only with a token |
+| `PORT` | `8000` | API port |
+| `BOARDPROOF_API_TOKEN` | empty | Required if the API binds beyond localhost |
+| `BOARDPROOF_WEB_ORIGINS` | `http://localhost:3000,http://127.0.0.1:3000` | Allowed browser origins |
+| `GEMINI_API_KEY` | unset | Optional. Datasheet / brief / photo import |
+
+The API is one local workspace. It is not a multi-user service.
+
+### 2. Frontend (Next.js)
+
+Keep the backend running. In a **second** terminal:
+
+```sh
+cd web
+npm ci
+cp .env.example .env.local
+npm run dev
+```
+
+Open http://localhost:3000. The Next.js server proxies `/api/*` to the Python backend, so the browser never holds `BOARDPROOF_API_TOKEN`.
+
+`web/.env.local`:
+
+```
+BOARDPROOF_API_URL=http://127.0.0.1:8000
+BOARDPROOF_API_TOKEN=
+```
+
+If you set a token on the backend, put the **same** value in `web/.env.local`. Do not put it in client code.
+
+| Script | What it does |
+| --- | --- |
+| `npm run dev` | Next.js dev server (port 3000) |
+| `npm run build` | Production build |
+| `npm start` | Serve the production build (run `build` first) |
+| `npm run typecheck` | TypeScript check |
+
+On Overview: **Demo 1** is the Jeden Uno (2D / 3D). **Import demo board** loads that KiCad layout and can export Gerbers. **Demo 2** is TMP102 Rev B (broken) then Rev C (fixed). Use **Run preflight** after you pick a board. Datasheet lookup is opt-in.
+
+CLI-only checks (no browser) are in the next section. Studio / `boardproof serve` on port 8080 is a separate stdlib dashboard, not the Next.js app.
+
+## Install and run the CLI demo
 
 Python 3.10+:
 
@@ -317,34 +381,15 @@ boardproof serve --dir artifacts       # http://localhost:8080 (+ /healthz for C
 
 `serve` is the stdlib HTTP server with a health endpoint, so the same artifacts run locally and on Cloud Run with `--port $PORT`. `docker build . && docker run -p 8080:8080 <image>` produces a container whose dashboard is already populated.
 
-## Web app
+## Web app API details
 
-The optional FastAPI service exposes the same Python onboarding and check engine to a web client:
+Start steps, env vars, and Next.js scripts are under **Start the web app** above.
 
-```sh
-pip install -e '.[api]'
-BOARDPROOF_ROOT=. BOARDPROOF_DIR=artifacts boardproof-api
-```
+The FastAPI backend exposes the same Python onboarding and check engine the CLI uses. It serves `GET /healthz`, `GET /api/state`, `GET /api/artifacts/{filename}`, `POST /api/upload`, and `POST /api/run`. Interactive API docs are at `/docs`. Upload JSON accepts `filename` plus `content_b64` (base64) or UTF-8 `content`, and optional `kind`, `brief`, and `fetch_datasheets` (false by default). Checks keep BoardProof's existing exit-code meaning: a completed check with findings returns its result, while invalid input/configuration is an HTTP 422.
 
-It serves `GET /healthz`, `GET /api/state`, `GET /api/artifacts/{filename}`, `POST /api/upload`, and `POST /api/run`. Interactive API docs are at `/docs`. Upload JSON accepts `filename` plus `content_b64` (base64) or UTF-8 `content`, and optional `kind`, `brief`, and `fetch_datasheets` (false by default). Checks keep BoardProof's existing exit-code meaning: a completed check with findings returns its result, while invalid input/configuration is an HTTP 422. The API uses one local workspace and filesystem; it is not a multi-user service.
+For an external bind, set `BOARDPROOF_API_TOKEN`, `BOARDPROOF_API_HOST=0.0.0.0`, and `BOARDPROOF_WEB_ORIGINS` to the exact frontend origin. Keep the bearer token in `web/.env.local` on the Next.js server; do not expose it in browser code.
 
-For an external bind, set `BOARDPROOF_API_TOKEN`, `BOARDPROOF_API_HOST=0.0.0.0`, and `BOARDPROOF_WEB_ORIGINS` to the exact frontend origin. Keep the bearer token on the Next.js server; do not expose it in browser code.
-
-The Next.js MVP lives in `web/` and proxies API calls server-side:
-
-```sh
-# Terminal 1, repository root
-pip install -e '.[api]'
-BOARDPROOF_ROOT=. BOARDPROOF_DIR=artifacts boardproof-api
-
-# Terminal 2
-cd web
-npm ci
-cp .env.example .env.local
-npm run dev
-```
-
-Open http://localhost:3000. Import a netlist or KiCad board, or select an example configuration and click **Run preflight**. Use the sidebar to inspect 2D and rotatable 3D previews, review circuit and layout evidence, and download the generated files. The web app reads previews from `BOARDPROOF_DIR` through the API. Datasheet lookup is opt-in, and importing a brief, photo, or schematic uses Gemini when configured.
+The Next.js app in `web/` proxies those routes server-side to `BOARDPROOF_API_URL`. Import a netlist or KiCad board, or select an example configuration and click **Run preflight**. Use the sidebar to inspect 2D and rotatable 3D previews, review circuit and layout evidence, and download the generated files. The web app reads previews from `BOARDPROOF_DIR` through the API. Datasheet lookup is opt-in, and importing a brief, photo, or schematic uses Gemini when configured.
 
 On Overview, **Demo 1** opens the Arduino-compatible Jeden Uno in the 2D and 3D viewers. Select **Import demo board** to bring the KiCad layout into your workspace and export Gerbers. **Demo 2** checks the faulty TMP102 Rev B and runs the corrected Rev C through board generation and verification. Use the board selector to switch layouts.
 
