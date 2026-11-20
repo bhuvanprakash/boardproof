@@ -58,7 +58,7 @@ Two processes. Leave both running.
 
 | Process | Where | Port |
 | --- | --- | --- |
-| Backend | Python FastAPI (`boardproof-api`) | http://127.0.0.1:8000 |
+| Backend | Python FastAPI (`boardproof-api`) | http://127.0.0.1:8193 |
 | Frontend | Next.js app in `web/` | http://localhost:3000 |
 
 ### 1. Backend (Python API)
@@ -72,15 +72,16 @@ python -m pip install -e '.[api]'
 BOARDPROOF_ROOT=. BOARDPROOF_DIR=artifacts boardproof-api
 ```
 
-Health: http://127.0.0.1:8000/healthz  
-Docs: http://127.0.0.1:8000/docs
+- Health: http://127.0.0.1:8193/healthz
+- Docs: http://127.0.0.1:8193/docs
 
 | Variable | Default | What it does |
 | --- | --- | --- |
 | `BOARDPROOF_ROOT` | `.` | Repo / workspace root the API is allowed to read |
 | `BOARDPROOF_DIR` | `<root>/artifacts` | Where reports, SVGs, and Gerbers are written |
+| `BOARDPROOF_DATASHEETS_DIR` | `<root>/datasheets` | Pinned datasheet PDFs and their `registry.json` |
 | `BOARDPROOF_API_HOST` | `127.0.0.1` | Bind address. Use `0.0.0.0` only with a token |
-| `PORT` | `8000` | API port |
+| `PORT` | `8193` | API port |
 | `BOARDPROOF_API_TOKEN` | empty | Required if the API binds beyond localhost |
 | `BOARDPROOF_WEB_ORIGINS` | `http://localhost:3000,http://127.0.0.1:3000` | Allowed browser origins |
 | `GEMINI_API_KEY` | unset | Optional. Datasheet / brief / photo import |
@@ -100,10 +101,20 @@ npm run dev
 
 Open http://localhost:3000. Next.js proxies `/api/*` to the Python backend, so the browser never holds `BOARDPROOF_API_TOKEN`.
 
+The sign-in screen is a local demo gate: it saves the entered email in the current browser tab. Password accounts, teams, and access roles are not implemented.
+
+| Path | Page |
+| --- | --- |
+| `/login` | Local demo sign-in |
+| `/` | Overview workbench |
+| `/dashboard` | Runs and evidence |
+| `/product` | Product notes |
+| `/how-it-works` | Trust chain and commands |
+
 `web/.env.local`:
 
 ```
-BOARDPROOF_API_URL=http://127.0.0.1:8000
+BOARDPROOF_API_URL=http://127.0.0.1:8193
 BOARDPROOF_API_TOKEN=
 ```
 
@@ -116,7 +127,7 @@ If you set a token on the backend, put the **same** value in `web/.env.local`. D
 | `npm start` | Serve the production build (run `build` first) |
 | `npm run typecheck` | TypeScript check |
 
-On Overview: **Demo 1** is the Jeden Uno (2D / 3D). **Import demo board** loads that KiCad layout and can export Gerbers. **Demo 2** is TMP102 Rev B (broken) then Rev C (fixed). Use **Run preflight** after you pick a board. Datasheet lookup is opt-in.
+On Overview: **Demo 1** opens the Jeden Uno in the 2D / 3D viewers. **Import demo board** loads its KiCad layout so you can export Gerbers. **Demo 2** checks TMP102 Rev B (broken) and offers the Rev C (fixed) comparison. Datasheet lookup is opt-in.
 
 CLI-only checks (no browser) are in the next section. Studio / `boardproof serve` on port 8080 is a separate stdlib dashboard, not the Next.js app.
 
@@ -471,15 +482,24 @@ The FastAPI backend exposes the same Python onboarding and check engine the CLI 
 | --- | --- |
 | `GET` | `/healthz` |
 | `GET` | `/api/state` |
+| `GET` | `/api/previews` | Schematic and datasheet previews with size and mtime |
+| `GET` | `/api/datasheets` | Datasheet registry: hash, source, cited page per part |
+| `POST` | `/api/datasheets/fetch` | Pin one part's PDF and record its SHA-256 |
+| `POST` | `/api/datasheets/verify` | Re-hash one stored datasheet against the registry |
+| `GET` | `/api/datasheets/pdf/{part}` | Download a pinned datasheet (slugified, traversal-guarded) |
 | `GET` | `/api/artifacts/{filename}` |
 | `POST` | `/api/upload` |
 | `POST` | `/api/run` |
 
-Interactive API docs are at `/docs`. Upload JSON accepts `filename` plus `content_b64` (base64) or UTF-8 `content`, and optional `kind`, `brief`, and `fetch_datasheets` (false by default). Checks keep BoardProof's existing exit-code meaning: a completed check with findings returns its result, while invalid input/configuration is an HTTP 422.
+`/api/datasheets/fetch` takes `part`, an optional direct `url`, and `refresh`. It only guesses a URL for part prefixes with a known vendor pattern; anything else is refused with a 422 instead of a wrong download. Files over 64 MB or without a `%PDF` header are never stored. `/api/datasheets/verify` re-computes the hash and reports drift — it never repairs it.
+
+Interactive API docs are at `/docs`. Upload JSON accepts `filename` plus `content_b64` (base64) or UTF-8 `content`, and optional `kind`, `brief`, `config_path`, and `fetch_datasheets` (false by default). Firmware source (`.h`, `.ino`, `.c`, `.cc`, `.cpp`) can be attached to an existing BoardProof configuration. The current firmware check reads simple numeric `#define` values referenced by `firmware_gpio` rules; unsupported macros remain unknown. Checks keep BoardProof's existing exit-code meaning: a completed check with findings returns its result, while invalid input/configuration is an HTTP 422.
 
 For an external bind, set `BOARDPROOF_API_TOKEN`, `BOARDPROOF_API_HOST=0.0.0.0`, and `BOARDPROOF_WEB_ORIGINS` to the exact frontend origin. Keep the bearer token in `web/.env.local` on the Next.js server; do not expose it in browser code.
 
-The Next.js app in `web/` proxies those routes server-side to `BOARDPROOF_API_URL`. Import a netlist or KiCad board, or select an example configuration and click **Run preflight**. Use the sidebar to inspect 2D and rotatable 3D previews, review circuit and layout evidence, and download the generated files. The web app reads previews from `BOARDPROOF_DIR` through the API. Datasheet lookup is opt-in, and importing a brief, photo, or schematic uses Gemini when configured.
+The Next.js app in `web/` proxies those routes server-side to `BOARDPROOF_API_URL`. Import a netlist, firmware source, or KiCad board, or select an example configuration and run a check. Use the top navigation and **Tools** menu to review runs, rules, compatibility, 2D / 3D previews, and evidence. The web app reads previews from `BOARDPROOF_DIR` through the API. Datasheet lookup is opt-in, and importing a brief, photo, or schematic uses Gemini when configured.
+
+The **Schematic** view lists every sheet drawn from the verified netlist with zoom, size, timestamp, and download/open links, and offers **Redraw from netlist** when none exists. The **Datasheets** view renders the registry as per-part cards — source host, pin time, size, truncated SHA-256 with copy, a **Verify hash** action that re-hashes the file on demand, and a thumbnail of the cited page — plus a form to fetch a part by number (or direct PDF URL) and a gallery of the rendered pages with zoom.
 
 On Overview, **Demo 1** opens the Arduino-compatible Jeden Uno in the 2D and 3D viewers. Select **Import demo board** to bring the KiCad layout into your workspace and export Gerbers. **Demo 2** checks the faulty TMP102 Rev B and runs the corrected Rev C through board generation and verification. Use the board selector to switch layouts.
 
