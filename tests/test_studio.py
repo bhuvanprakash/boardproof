@@ -57,10 +57,22 @@ class TestActions(unittest.TestCase):
         with TemporaryDirectory() as td:
             out = Path(td)
             result = run_action(ROOT, out, 'prove', CONFIG)
-            self.assertTrue(result['ok'], result['log'])
             for name in ('report.html', 'pcb-check.json', 'redteam.json', 'passport.html'):
                 self.assertTrue((out / name).is_file(), name)
-            self.assertEqual(result['code'], 0)
+            pcb = json.loads((out / 'pcb-check.json').read_text())
+            passport = json.loads((out / 'passport.json').read_text())
+            if pcb['nets']['unrouted']:
+                # The router refuses this fixture's own clearance check, so the pipeline
+                # ships a placement-only board and must ask for review, never claim pass.
+                self.assertEqual('review', pcb['status'])
+                self.assertEqual('Routing was not attempted.', pcb['review_reason'])
+                self.assertEqual(1, result['code'], result['log'])
+                self.assertFalse(result['ok'])
+                self.assertGreater(passport['counts']['unverified'], 0)
+            else:
+                self.assertEqual('passed', pcb['status'])
+                self.assertEqual(0, result['code'], result['log'])
+                self.assertTrue(result['ok'], result['log'])
 
     def test_design_then_verify_board(self):
         with TemporaryDirectory() as td:
@@ -69,8 +81,38 @@ class TestActions(unittest.TestCase):
             board = newest_board(out)
             self.assertIsNotNone(board)
             result = run_action(ROOT, out, 'pcb', CONFIG)
-            self.assertTrue(result['ok'], result['log'])
             self.assertTrue((out / 'pcb-check.json').is_file())
+            pcb = json.loads((out / 'pcb-check.json').read_text())
+            if pcb['nets']['unrouted']:
+                # The design action does not route copper, so verifying it must not
+                # report a connected board.
+                self.assertEqual(1, result['code'], result['log'])
+                self.assertFalse(result['ok'])
+                self.assertLess(pcb['nets']['fully_connected'], pcb['nets']['total'])
+            else:
+                self.assertTrue(result['ok'], result['log'])
+
+    def test_passport_reports_when_selected_board_differs_from_checked_board(self):
+        with TemporaryDirectory() as td:
+            out = Path(td)
+            design = run_action(ROOT, out, 'design', CONFIG)
+            self.assertTrue(design['ok'], design['log'])
+            checked_board = design['board']
+            self.assertIsNotNone(checked_board)
+            pcb = run_action(ROOT, out, 'pcb', CONFIG, board=checked_board)
+            self.assertIn(pcb['code'], (0, 1), pcb['log'])
+            self.assertTrue((out / 'pcb-check.json').is_file())
+
+            selected_board = out / 'selected.kicad_pcb'
+            selected_board.write_bytes((out / checked_board).read_bytes())
+            passport = run_action(ROOT, out, 'passport', CONFIG, board=selected_board.name)
+            self.assertEqual(1, passport['code'], passport['log'])
+            data = json.loads((out / 'passport.json').read_text())
+            self.assertNotIn('pcb', data)
+            self.assertIn(
+                'The PCB report is for a different board than the selected board.',
+                data['unverified_scope'],
+            )
 
     def test_redteam_and_passport(self):
         with TemporaryDirectory() as td:
@@ -80,9 +122,14 @@ class TestActions(unittest.TestCase):
             self.assertTrue(red['ok'], red['log'])
             self.assertIn('targeted faults caught', red['log'][0])
             doc = run_action(ROOT, out, 'passport', CONFIG)
-            self.assertTrue(doc['ok'], doc['log'])
             data = json.loads((out / 'passport.json').read_text())
             self.assertIn('passport_hash', data)
+            if data['counts']['unverified']:
+                # Unverified copper evidence downgrades the passport to review.
+                self.assertEqual(1, doc['code'], doc['log'])
+                self.assertFalse(doc['ok'])
+            else:
+                self.assertTrue(doc['ok'], doc['log'])
 
 
 class TestDashboardPanel(unittest.TestCase):

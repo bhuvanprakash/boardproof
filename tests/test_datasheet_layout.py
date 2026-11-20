@@ -1,8 +1,11 @@
 """Datasheet-driven layout verification: fetch -> package spec -> land pattern check."""
 import json
+import socket
 from pathlib import Path
 from tempfile import TemporaryDirectory
+import urllib.request
 import unittest
+from unittest.mock import patch
 
 import boardproof.datasheets as datasheets
 from boardproof.design import build_board, write_board
@@ -32,7 +35,8 @@ class TestDatasheetRegistry(unittest.TestCase):
             directory = Path(td)
             source = directory / 'src.pdf'
             source.write_bytes(b'%PDF-1.4 fake datasheet for tests')
-            entry = datasheets.fetch('TMP102AIDRLR', directory, url=source.as_uri())
+            with patch.object(datasheets, '_validate_public_pdf_url', side_effect=lambda url: url):
+                entry = datasheets.fetch('TMP102AIDRLR', directory, url=source.as_uri())
             self.assertTrue(Path(entry['path']).is_file())
             self.assertEqual(64, len(entry['sha256']))
             self.assertTrue(datasheets.verify('TMP102AIDRLR', directory)['ok'])
@@ -45,12 +49,40 @@ class TestDatasheetRegistry(unittest.TestCase):
             bogus = directory / 'x.pdf'
             bogus.write_bytes(b'<html>nope</html>')
             with self.assertRaises(datasheets.DatasheetError):
-                datasheets.fetch('TMP102AIDRLR', directory, url=bogus.as_uri())
+                with patch.object(datasheets, '_validate_public_pdf_url', side_effect=lambda url: url):
+                    datasheets.fetch('TMP102AIDRLR', directory, url=bogus.as_uri())
             self.assertFalse((directory / 'tmp102aidrlr.pdf').exists())
 
     def test_unknown_part_requires_explicit_url(self):
         with self.assertRaises(datasheets.DatasheetError):
             datasheets.guess_url('XYZ999')
+
+
+class TestDatasheetUrlSafety(unittest.TestCase):
+    def test_rejects_non_web_and_private_ip_urls(self):
+        urls = ('file:///etc/passwd', 'ftp://example.com/datasheet.pdf',
+                'http://127.0.0.1/latest', 'https://[::1]/datasheet.pdf')
+        for url in urls:
+            with self.subTest(url=url), self.assertRaises(datasheets.DatasheetError):
+                datasheets._validate_public_pdf_url(url)
+
+    def test_rejects_hostnames_with_private_dns_answers(self):
+        private = [(socket.AF_INET, socket.SOCK_STREAM, 6, '', ('10.0.0.8', 443))]
+        with patch.object(datasheets.socket, 'getaddrinfo', return_value=private):
+            with self.assertRaises(datasheets.DatasheetError):
+                datasheets._validate_public_pdf_url('https://datasheet.example/file.pdf')
+
+    def test_accepts_public_hosts_and_rejects_private_redirects(self):
+        public = [(socket.AF_INET, socket.SOCK_STREAM, 6, '', ('93.184.216.34', 443))]
+        with patch.object(datasheets.socket, 'getaddrinfo', return_value=public):
+            self.assertEqual(
+                'https://datasheet.example/file.pdf',
+                datasheets._validate_public_pdf_url('https://datasheet.example/file.pdf'),
+            )
+        handler = datasheets._PublicRedirectHandler()
+        request = urllib.request.Request('https://datasheet.example/start.pdf')
+        with self.assertRaises(datasheets.DatasheetError):
+            handler.redirect_request(request, None, 302, 'Found', {}, 'http://127.0.0.1/secret')
 
 
 class TestPackageSpec(unittest.TestCase):
