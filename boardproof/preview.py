@@ -6,6 +6,8 @@ schematic is a drawn graph of the same pins the checker verified.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import shutil
 import subprocess
 from pathlib import Path
@@ -21,14 +23,34 @@ def render_pdf_page(pdf: Path, page: int | str, out_png: Path, dpi: int = 110) -
     pdf, out_png = Path(pdf), Path(out_png)
     if not pdf.is_file():
         return {"available": False, "note": f"datasheet not on disk: {pdf.name}"}
-    tool = shutil.which("pdftoppm")
-    if not tool:
-        return {"available": False, "note": "pdftoppm (poppler) not installed"}
     try:
         page_number = max(1, int(str(page).strip()))
     except (TypeError, ValueError):
         return {"available": False, "note": f"page {page!r} is not a number"}
+
+    def digest(path: Path) -> str:
+        hasher = hashlib.sha256()
+        with path.open("rb") as source:
+            for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                hasher.update(chunk)
+        return hasher.hexdigest()
+
     out_png.parent.mkdir(parents=True, exist_ok=True)
+    pdf_sha256 = digest(pdf)
+    cache_path = out_png.with_name(f".{out_png.name}.cache.json")
+    try:
+        cache = json.loads(cache_path.read_text(encoding="utf-8"))
+        if (cache.get("pdf_sha256") == pdf_sha256 and cache.get("page") == page_number
+                and cache.get("dpi") == dpi and out_png.is_file()
+                and cache.get("output_sha256") == digest(out_png)):
+            return {"available": True, "page": page_number, "image": out_png.name,
+                    "pdf": pdf.name, "bytes": out_png.stat().st_size, "cached": True}
+    except (OSError, json.JSONDecodeError, AttributeError, TypeError):
+        pass
+
+    tool = shutil.which("pdftoppm")
+    if not tool:
+        return {"available": False, "note": "pdftoppm (poppler) not installed"}
     prefix = out_png.with_suffix("")
     try:
         proc = subprocess.run(
@@ -39,10 +61,18 @@ def render_pdf_page(pdf: Path, page: int | str, out_png: Path, dpi: int = 110) -
         return {"available": False, "note": f"pdftoppm failed: {exc}"}
     produced = prefix.with_suffix(".png")
     if proc.returncode != 0 or not produced.is_file():
+        out_png.unlink(missing_ok=True)
+        cache_path.unlink(missing_ok=True)
         return {"available": False,
                 "note": (proc.stderr or "pdftoppm produced no image").strip()[:200]}
+    cache_path.write_text(json.dumps({
+        "pdf_sha256": pdf_sha256,
+        "page": page_number,
+        "dpi": dpi,
+        "output_sha256": digest(produced),
+    }, sort_keys=True) + "\n", encoding="utf-8")
     return {"available": True, "page": page_number, "image": produced.name,
-            "pdf": pdf.name, "bytes": produced.stat().st_size}
+            "pdf": pdf.name, "bytes": produced.stat().st_size, "cached": False}
 
 
 # --------------------------------------------------------------- schematic ---
@@ -55,9 +85,21 @@ def render_schematic(design: Design, width: float = 980) -> str:
     components = [c for c in design.components.values()]
     components.sort(key=lambda c: (c.ref[:1].upper() != "U", c.ref))
     nets = sorted(design.nets)
-    row_h = 74
-    pad_top, pad_left = 54, 168
-    height = max(240, pad_top + row_h * max(len(components), len(nets)) + 40)
+    pad_top = 54
+    row_gap = 16
+    pin_step = 11
+    rail_step = 42
+    # A box must be tall enough for its header lines plus every pin stub, and rows
+    # are stacked at their own height so a 6-pin part never overlaps the next one.
+    heights = [48 + len(c.pins) * pin_step for c in components]
+    row_y: list[float] = []
+    cursor = float(pad_top)
+    for box_height in heights:
+        row_y.append(cursor)
+        cursor += box_height + row_gap
+    parts_bottom = cursor - row_gap + 44 if components else pad_top + 44
+    rails_bottom = pad_top + 18 + len(nets) * rail_step + 44 if nets else pad_top + 44
+    height = max(240, parts_bottom, rails_bottom)
     out = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width:.0f} {height:.0f}" '
            f'width="100%" role="img" aria-label="schematic derived from the netlist">',
            f'<rect width="100%" height="100%" fill="#ffffff"/>',
@@ -68,9 +110,9 @@ def render_schematic(design: Design, width: float = 980) -> str:
 
     # parts, left column
     for index, comp in enumerate(components):
-        y = pad_top + index * row_h
+        y = row_y[index]
         pins = len(comp.pins)
-        box = 20 + pins * 11
+        box = heights[index]
         out.append(f'<rect x="24" y="{y}" width="132" height="{box}" rx="3" fill="#f7f9fc" '
                    f'stroke="#465266" stroke-width="1"/>')
         out.append(f'<text x="32" y="{y + 15}" font-family="{MONO}" font-size="11" '
@@ -89,7 +131,7 @@ def render_schematic(design: Design, width: float = 980) -> str:
     # nets, right column: one rail per net, with every pin that lands on it
     rail_x = 420
     for index, net in enumerate(nets):
-        y = pad_top + 18 + index * 42
+        y = pad_top + 18 + index * rail_step
         members = design.nets[net]
         reach = max(240, 90 + len(members) * 46)
         colour = "#0b7a5f" if net.upper() in {"3V3", "5V", "VCC", "VDD"} else (

@@ -5,7 +5,10 @@ generated here can block a build until a human promotes it.
 """
 from __future__ import annotations
 
+import json
+import os
 import re
+import tempfile
 from pathlib import Path
 
 import boardproof.datasheets as datasheets
@@ -20,7 +23,7 @@ UPLOAD_DIR = "uploads"
 PART_KEYS = ("Manufacturer Part", "DeviceName", "Value")
 SUFFIXES = (
     ".enet", ".json", ".kicad_pcb", ".kicad_sch", ".txt", ".md",
-    ".png", ".jpg", ".jpeg", ".webp", ".gif",
+    ".png", ".jpg", ".jpeg", ".webp", ".gif", ".h", ".ino", ".c", ".cc", ".cpp",
 )
 MIME = {
     ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
@@ -42,6 +45,26 @@ def _safe_name(name: str) -> str:
     return cleaned or "board.enet"
 
 
+def _unique_name(root: Path, out_dir: Path, filename: str, route: str) -> str:
+    path = Path(filename)
+    stem, suffix = path.stem, path.suffix
+    index = 1
+    while True:
+        candidate = f"{stem}{'' if index == 1 else f'-{index}'}{suffix}"
+        name = Path(candidate).stem
+        stored = route in {"enet", "schematic", "firmware"} and (
+            (root / UPLOAD_DIR / candidate).exists()
+            or (root / UPLOAD_DIR / f"{name}.boardproof.json").exists()
+        )
+        generated = any((out_dir / artifact).exists() for artifact in (
+            f"{name}.kicad_pcb", f"{name}.svg", f"{name}-3d.svg",
+            f"{name}-model.json", f"{name}-gerbers.zip",
+        ))
+        if not stored and not generated:
+            return candidate
+        index += 1
+
+
 def _part_of(component) -> str:
     for key in PART_KEYS:
         value = str(component.attributes.get(key) or "").strip()
@@ -52,7 +75,7 @@ def _part_of(component) -> str:
 
 def _classify(filename: str, kind: str, content: bytes, brief: str) -> str:
     requested = (kind or "").strip().lower()
-    if requested in {"photo", "brief", "pcb", "schematic", "enet"}:
+    if requested in {"photo", "brief", "pcb", "schematic", "enet", "firmware"}:
         return requested
     lower = filename.lower()
     if lower.endswith(".kicad_pcb"):
@@ -63,6 +86,8 @@ def _classify(filename: str, kind: str, content: bytes, brief: str) -> str:
         return "photo"
     if lower.endswith((".txt", ".md")):
         return "brief"
+    if lower.endswith((".h", ".ino", ".c", ".cc", ".cpp")):
+        return "firmware"
     if brief and not (content or b"").strip():
         return "brief"
     return "enet"
@@ -208,11 +233,8 @@ def _from_intent(root: Path, out_dir: Path, filename: str, brief: str, kind: str
     target = root / UPLOAD_DIR / "intent.txt"
     target.parent.mkdir(parents=True, exist_ok=True)
     body = brief.strip() or f"uploaded {filename} ({kind})"
-    if target.exists():
-        target.write_text(target.read_text(encoding="utf-8") + "\n---\n" + body + "\n",
-                          encoding="utf-8")
-    else:
-        target.write_text(body + "\n", encoding="utf-8")
+    with target.open("a", encoding="utf-8") as history:
+        history.write(("\n---\n" if target.stat().st_size else "") + body + "\n")
     mime = MIME.get(Path(filename).suffix.lower(), "application/octet-stream")
     attachments = [(content, mime, filename)] if content else []
     try:
@@ -288,18 +310,69 @@ def _emit_from_netlist(root: Path, out_dir: Path, result: dict) -> dict:
 
 def onboard(root: Path, out_dir: Path, filename: str, content: bytes,
             brief: str = "", kind: str = "", engine: str = "auto",
-            fetch_datasheets: bool = True) -> dict:
-    root, out_dir = Path(root), Path(out_dir)
+            fetch_datasheets: bool = True, config_path: str | None = None) -> dict:
+    root, out_dir = Path(root).resolve(), Path(out_dir).resolve()
     if len(content) > MAX_BYTES:
         raise UploadError(f"file is larger than {MAX_BYTES // (1024 * 1024)} MB")
     safe = _safe_name(filename)
     route = _classify(safe, kind, content, brief)
     out_dir.mkdir(parents=True, exist_ok=True)
+    safe = _unique_name(root, out_dir, safe, route)
 
     if route in {"photo", "brief"}:
         if not (content or b"").strip() and not (brief or "").strip():
             raise UploadError("the uploaded file is empty")
         return _from_intent(root, out_dir, safe, brief, route, content, engine)
+
+    if route == "firmware":
+        if Path(safe).suffix.lower() not in {".h", ".ino", ".c", ".cc", ".cpp"}:
+            raise UploadError("firmware uploads must be a .h, .ino, .c, .cc, or .cpp file")
+        if not content.strip():
+            raise UploadError("the uploaded firmware file is empty")
+        try:
+            content.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise UploadError("firmware source must be UTF-8 text") from exc
+        if not config_path:
+            raise UploadError("select a BoardProof configuration before attaching firmware")
+        selected_config = (root / config_path).resolve()
+        if root not in selected_config.parents or not selected_config.is_file():
+            raise UploadError("the selected configuration is outside the workspace or does not exist")
+        try:
+            config = json.loads(selected_config.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise UploadError("the selected configuration is not valid JSON") from exc
+        if (not isinstance(config, dict) or config.get("schema_version") != 1
+                or not isinstance(config.get("rules"), list) or not config["rules"]):
+            raise UploadError("the selected file is not a BoardProof configuration")
+
+        upload_root = (root / UPLOAD_DIR).resolve()
+        if root not in upload_root.parents:
+            raise UploadError("the workspace upload folder is outside the workspace")
+        target = upload_root / safe
+        upload_root.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(content)
+        config["firmware"] = Path(os.path.relpath(target, selected_config.parent)).as_posix()
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", dir=selected_config.parent,
+                prefix=selected_config.name + ".", suffix=".tmp", delete=False,
+            ) as stream:
+                temporary = Path(stream.name)
+                stream.write(json.dumps(config, indent=2) + "\n")
+            os.replace(temporary, selected_config)
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
+        return {
+            "ok": True,
+            "kind": "firmware",
+            "config": selected_config.relative_to(root).as_posix(),
+            "firmware": target.relative_to(root).as_posix(),
+            "log": [f"attached {target.name} to {selected_config.relative_to(root)}"],
+            "next": ["run a hardware check to evaluate firmware_gpio rules"],
+        }
 
     if route == "schematic":
         target = root / UPLOAD_DIR / safe

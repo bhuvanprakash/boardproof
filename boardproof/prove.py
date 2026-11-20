@@ -5,6 +5,7 @@ cannot drift from what CI actually runs.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -40,6 +41,7 @@ def run_prove(config: Path, out_dir: Path, outline: str = "44x48mm", route: bool
 
     # 2. layout generation, refused while the circuit is broken
     design_board = None
+    board_path = None
     if exit_code != 0:
         record("design", "refused",
                "critical schematic violations must be fixed before a board is generated")
@@ -82,11 +84,18 @@ def run_prove(config: Path, out_dir: Path, outline: str = "44x48mm", route: bool
         pcb = check_board(board_path, design, require_routing=route, packages=packages,
                           net_currents=spec.get("net_currents") or {},
                           copper_oz=float(spec.get("copper_oz", 1.0)))
-        pcb.update({"config": str(config), "svg": str(out_dir / "board.svg")})
+        pcb.update({"config": str(config), "svg": str(out_dir / "board.svg"),
+                    "board_sha256": hashlib.sha256(board_path.read_bytes()).hexdigest()})
+        pcb_status = "review" if pcb["nets"]["unrouted"] else pcb["status"]
+        if pcb_status == "review":
+            pcb["status"] = "review"
+            pcb["review_reason"] = ("Routing was not attempted." if not route
+                                    else "Unrouted nets remain after routing.")
+        routing_note = "; copper routing was not attempted" if not route and pcb["nets"]["unrouted"] else ""
         (out_dir / "pcb-check.json").write_text(json.dumps(pcb, indent=2) + "\n", encoding="utf-8")
-        record("pcb-check", pcb["status"],
+        record("pcb-check", pcb_status,
                f"{pcb['nets']['fully_connected']}/{pcb['nets']['total']} nets connected, "
-               f"{pcb['counts']['error']} error(s)")
+               f"{pcb['counts']['error']} error(s){routing_note}")
 
         # preview assets: derived schematic + the cited datasheet pages
         from .package import load_spec
@@ -119,7 +128,8 @@ def run_prove(config: Path, out_dir: Path, outline: str = "44x48mm", route: bool
 
         # 5. does the layout verifier catch real faults?
         layout = run_pcb_redteam(board_path, design)
-        layout["config"] = str(config)
+        layout.update({"config": str(config),
+                       "board_sha256": hashlib.sha256(board_path.read_bytes()).hexdigest()})
         (out_dir / "pcb-redteam.json").write_text(json.dumps(layout, indent=2) + "\n",
                                                   encoding="utf-8")
         record("layout-red-team", "passed" if layout["score"]["ratio"] >= 1.0 else "gaps",
@@ -127,13 +137,17 @@ def run_prove(config: Path, out_dir: Path, outline: str = "44x48mm", route: bool
 
     # 6. the artifact a human signs
     document = build_document(out_dir, revision or f"{config.stem} @ {width:g}x{height:g} mm",
-                              report=data, config=config, include_board=design_board is not None)
+                              report=data, config=config, include_board=design_board is not None,
+                              board=board_path)
     (out_dir / "passport.html").write_text(document["html"], encoding="utf-8")
     (out_dir / "passport.json").write_text(json.dumps(document["json"], indent=2) + "\n",
                                            encoding="utf-8")
     record("passport", document["json"]["status"],
            f"{document['json']['counts']['critical']} critical, "
            f"{document['json']['counts']['unverified']} unverified")
+
+    if document["json"]["status"] != "cleared" and exit_code == 0:
+        exit_code = 1
 
     if dashboard:
         from .dashboard import collect, render as render_dashboard

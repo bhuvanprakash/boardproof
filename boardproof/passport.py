@@ -41,6 +41,7 @@ h1{font-family:var(--serif);font-size:33px;line-height:1.16;letter-spacing:-.4px
 .stamp{border:2.5px solid var(--red);color:var(--red);padding:9px 18px;transform:rotate(-4deg);
   font:700 21px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase;white-space:nowrap}
 .stamp.clear{border-color:var(--teal);color:var(--teal)}
+.stamp.review{border-color:var(--amber);color:var(--amber)}
 .counters{display:grid;grid-template-columns:repeat(3,1fr);gap:0;margin:26px 0 4px;
   border-top:1px solid var(--rule);border-bottom:1px solid var(--rule)}
 .counters div{padding:16px 4px}
@@ -98,12 +99,27 @@ td.mono{font-family:var(--mono);font-size:13px}
 
 
 def passport_hash(data: dict) -> str:
+    pcb = data.get("pcb") or {}
+    pcb_findings = pcb.get("findings") or []
+    redteam = data.get("redteam") or {}
+    layout_redteam = data.get("layout_redteam") or {}
     payload = {
         "netlist_sha256": data.get("netlist_sha256"),
         "config": data.get("config"),
+        "status": data.get("status"),
         "packs": [(p.get("id"), p.get("reviewed_by"), p.get("status")) for p in data.get("packs") or []],
         "findings": [[f.get("code"), f.get("message"), f.get("severity")] for f in data.get("findings") or []],
         "unverified": data.get("unverified_scope") or [],
+        "pcb": {
+            "board_sha256": pcb.get("board_sha256"),
+            "routing_required": pcb.get("routing_required"),
+            "unrouted": (pcb.get("nets") or {}).get("unrouted") or [],
+            "findings": [[f.get("code"), f.get("message"), f.get("severity")]
+                         for f in pcb_findings],
+            "unverified": pcb.get("unverified") or [],
+        } if pcb else None,
+        "redteam": redteam.get("score"),
+        "layout_redteam": layout_redteam.get("score"),
     }
     digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
     return digest
@@ -192,10 +208,27 @@ def _failure(item: dict) -> str:
 
 def render(document: dict) -> str:
     counts = document["counts"]
-    blocked = document["status"] == "blocked"
-    failures = "".join(_failure(f) for f in document["failures"]) or (
-        '<div class="item"><span class="tag ok">pass</span><div><h3>No violations of the approved rules'
-        "</h3><p>Every configured cross-layer constraint held. This does not certify the board.</p></div></div>")
+    status = document.get("status", "review")
+    blocked = status == "blocked"
+    failures = "".join(_failure(f) for f in document["failures"])
+    if not failures and status == "review":
+        failures = (
+            '<div class="item"><span class="tag gap">review</span><div>'
+            "<h3>More evidence is needed</h3>"
+            "<p>Resolve the unverified items before treating this board as cleared.</p>"
+            "</div></div>"
+        )
+    elif not failures and blocked:
+        failures = (
+            '<div class="item"><span class="tag">blocked</span><div>'
+            "<h3>This passport is blocked</h3>"
+            "<p>Review the findings before continuing.</p></div></div>"
+        )
+    elif not failures:
+        failures = (
+            '<div class="item"><span class="tag ok">pass</span><div><h3>No violations of the approved rules'
+            "</h3><p>Every configured cross-layer constraint held. This does not certify the board.</p></div></div>"
+        )
     verified_rows = "".join(
         f"<li>{html.escape(label)} <span class=\"hash\">×{count}</span></li>"
         for label, count in (
@@ -311,15 +344,15 @@ def render(document: dict) -> str:
         + html.escape(Path(str(document["netlist"] or "")).name) + " &nbsp;·&nbsp; "
         + html.escape(str(document["generated_at"] or "")) + " &nbsp;·&nbsp; config "
         + html.escape(str(document["config"] or "-")) + "</div></div>"
-        '<div class="stamp' + ("" if blocked else " clear") + '">'
-        + ("BLOCKED" if blocked else "CLEARED") + "</div></header>"
+        '<div class="stamp' + ("" if blocked else " review" if status == "review" else " clear") + '">'
+        + ("BLOCKED" if blocked else "REVIEW" if status == "review" else "CLEARED") + "</div></header>"
         '<div class="counters">'
         '<div><span>checks passed</span><strong>' + str(counts["checks_passed"]) + "</strong>"
         "<em>approved cross-layer constraints that held</em></div>"
         '<div class="bad"><span>critical failures</span><strong>' + str(counts["critical"]) + "</strong>"
         "<em>must be fixed before fabrication</em></div>"
         '<div class="warn"><span>unverified</span><strong>' + str(counts["unverified"]) + "</strong>"
-        "<em>outside this tool's scope</em></div></div>"
+        "<em>not checked in this run or outside this tool's scope</em></div></div>"
         "<h2>Critical failures</h2>" + failures + pcb_html + redteam + delta_html
         + '<div class="two"><div><h2>Verified by this run</h2><ul class="plain chk">' + verified_rows
         + '</ul></div><div><h2>Not verified — do not assume</h2><ul class="plain unk">'
@@ -349,8 +382,10 @@ def _read_evidence(path: Path) -> dict | None:
 
 
 def build_document(out_dir: Path, revision: str, *, report: dict | None = None,
-                   config: Path | None = None, include_board: bool = True) -> dict:
+                   config: Path | None = None, include_board: bool = True,
+                   board: Path | str | None = None) -> dict:
     out_dir = Path(out_dir)
+    output_root = out_dir.resolve()
     report = report or _read_evidence(out_dir / "report.json")
     if report is None:
         raise ValueError("Run a circuit check before building a passport")
@@ -363,13 +398,77 @@ def build_document(out_dir: Path, revision: str, *, report: dict | None = None,
 
     pcb = evidence("pcb-check.json") if include_board else None
     rules = evidence("redteam.json") if include_board else None
-    layout = evidence("pcb-redteam.json") if include_board else None
+    layout = None
+    board_issue = None
+    if include_board:
+        if pcb is None:
+            board_issue = "No PCB verification report matches this configuration."
+        else:
+            try:
+                pcb_board = Path(str(pcb.get("board") or "")).resolve()
+                if pcb_board.parent != output_root or not pcb_board.is_file():
+                    board_issue = "The PCB report refers to a missing board in this workspace."
+                    pcb = None
+                elif board is not None and pcb_board.name != Path(board).name:
+                    board_issue = "The PCB report is for a different board than the selected board."
+                    pcb = None
+                elif pcb.get("board_sha256") != hashlib.sha256(pcb_board.read_bytes()).hexdigest():
+                    board_issue = "The board changed after its PCB report was created. Run PCB verification again."
+                    pcb = None
+            except OSError:
+                board_issue = "The PCB report could not be matched to a readable board file."
+                pcb = None
+        if pcb is not None:
+            layout = evidence("pcb-redteam.json")
+            if layout and layout.get("board_sha256") != pcb.get("board_sha256"):
+                layout = None
+
     document = build(report, revision, None, rules)
     document["layout_redteam"] = layout
     if pcb:
         document["pcb"] = pcb
         svg = (out_dir / Path(pcb.get("svg") or "").name).resolve()
-        if svg.parent == out_dir.resolve() and svg.is_file():
+        if svg.parent == output_root and svg.is_file():
             document["pcb_svg"] = svg.read_text(encoding="utf-8")
             document["pcb"]["inline_svg"] = True
+
+        pcb_findings = pcb.get("findings") or []
+        pcb_errors = [finding for finding in pcb_findings if finding.get("severity") == "error"]
+        pcb_warnings = [finding for finding in pcb_findings if finding.get("severity") == "warning"]
+        document["failures"].extend({
+            "severity": "error",
+            "code": f"PCB_{finding.get('code', 'FINDING')}",
+            "message": finding.get("message", "PCB verification failed"),
+            "evidence": finding.get("evidence") or {},
+        } for finding in pcb_errors)
+        document["counts"]["critical"] += len(pcb_errors)
+        document["counts"]["warnings"] += len(pcb_warnings)
+        document["warnings"].extend(pcb_warnings)
+        if pcb_errors:
+            document["status"] = "blocked"
+
+        unrouted = (pcb.get("nets") or {}).get("unrouted") or []
+        if unrouted:
+            document["unverified_scope"].append(
+                f"Copper connectivity is unfinished for {len(unrouted)} net(s): "
+                f"{', '.join(str(net) for net in unrouted[:8])}."
+            )
+            if document["status"] != "blocked":
+                document["status"] = "review"
+    elif board_issue:
+        document["unverified_scope"].append(board_issue)
+        if document["status"] != "blocked":
+            document["status"] = "review"
+
+    for label, evidence_data in (("Rule red-team", document.get("redteam")),
+                                 ("Layout red-team", layout)):
+        score = (evidence_data or {}).get("score") or {}
+        gaps = int(score.get("gaps") or 0)
+        if gaps:
+            document["unverified_scope"].append(f"{label} found {gaps} blind spot(s).")
+            if document["status"] != "blocked":
+                document["status"] = "review"
+
+    document["counts"]["unverified"] = len(document["unverified_scope"])
+    document["passport_hash"] = passport_hash(document)
     return {"json": document, "html": render(document)}
