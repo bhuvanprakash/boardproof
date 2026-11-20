@@ -118,11 +118,13 @@ export function createBoardRenderer(model) {
           return p.X.toFixed(2) + ',' + p.Y.toFixed(2);
         }).join(' ') + '" fill="' + COPPER_LIGHT + '" stroke="' + COPPER + '" stroke-width="0.08"/>');
       });
+      const fontSize = Math.max(0.45, Math.min(0.82, Math.min(part.w, part.d) * 0.55));
       const label = project((quad[0][0] + quad[2][0]) / 2, (quad[0][1] + quad[2][1]) / 2,
-                            zt + part.z + 1.1, yaw);
+                            zt + part.z + Math.max(0.6, part.z * 0.25), yaw);
       parts.push('<text x="' + label.X.toFixed(2) + '" y="' + label.Y.toFixed(2) +
-        '" font-family="ui-sans-serif,system-ui,sans-serif" font-size="1.7" fill="' + SILK +
-        '" text-anchor="middle" opacity="0.9">' + escapeText(part.ref) + '</text>');
+        '" font-family="ui-sans-serif,system-ui,sans-serif" font-size="' + fontSize.toFixed(2) +
+        '" fill="' + SILK + '" stroke="#10202b" stroke-width="0.12" paint-order="stroke"' +
+        ' text-anchor="middle" opacity="0.95">' + escapeText(part.ref) + '</text>');
     });
 
     (model.vias || []).forEach((via) => {

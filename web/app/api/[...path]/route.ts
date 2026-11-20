@@ -6,17 +6,23 @@ export const runtime = "nodejs";
 type Context = { params: Promise<{ path: string[] }> };
 
 function allowed(path: string[], method: string): boolean {
-  if (path.length === 1 && path[0] === "state") return method === "GET";
+  const safe = (name: string) => !!name && ![".", ".."].includes(name) && !/[\\/]/.test(name);
+  if (path.length === 1 && ["state", "previews", "datasheets"].includes(path[0])) return method === "GET";
   if (path.length === 1 && ["upload", "run"].includes(path[0])) return method === "POST";
-  return path.length === 2 && ["artifacts", "previews"].includes(path[0]) && method === "GET"
-    && ![".", ".."].includes(path[1]) && !/[\\/]/.test(path[1]);
+  if (path.length === 2 && ["artifacts", "previews"].includes(path[0])) return method === "GET" && safe(path[1]);
+  if (path.length === 2 && path[0] === "datasheets" && ["fetch", "verify", "verify-all"].includes(path[1])) {
+    return method === "POST";
+  }
+  // /api/datasheets/pdf/{part} — part numbers are slugified upstream; guard anyway.
+  return path.length === 3 && path[0] === "datasheets" && path[1] === "pdf"
+    && method === "GET" && safe(path[2]);
 }
 
 async function proxy(request: NextRequest, context: Context) {
   const { path } = await context.params;
   if (!allowed(path, request.method)) return Response.json({ detail: "not found" }, { status: 404 });
 
-  const origin = process.env.BOARDPROOF_API_URL ?? "http://127.0.0.1:8000";
+  const origin = process.env.BOARDPROOF_API_URL ?? "http://127.0.0.1:8193";
   const url = new URL(`/api/${path.map(encodeURIComponent).join("/")}`, origin);
   url.search = request.nextUrl.search;
   const headers = new Headers({ Accept: "application/json" });

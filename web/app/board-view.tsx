@@ -1,13 +1,22 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import {
+  Dialog,
+  DialogBackdrop,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+  DialogTrigger,
+} from "@ui-sdk/react/dialog";
 import { createBoardRenderer } from "./board-renderer";
 
 export type Board = { name: string; top?: string; iso?: string; model?: string; gerbers?: string; demo?: boolean };
 export const artifactUrl = (file: string) => `/api/artifacts/${encodeURIComponent(file)}`;
 export const boardFileUrl = (board: Board, file: string) =>
   board.demo ? `/demo/arduino/${encodeURIComponent(file)}` : artifactUrl(file);
-const previewUrl = (file: string) => `/api/previews/${encodeURIComponent(file)}`;
+export const previewUrl = (file: string) => `/api/previews/${encodeURIComponent(file)}`;
 
 export const arduinoBoard: Board = {
   name: "jeden-uno.kicad_pcb", top: "jeden-uno.svg", iso: "jeden-uno-3d.svg",
@@ -16,19 +25,22 @@ export const arduinoBoard: Board = {
 
 function ImagePreview({ url, label }: { url: string; label: string }) {
   const [failed, setFailed] = useState(false);
+  const [loaded, setLoaded] = useState(false);
 
-  return failed ? <p className="empty-copy">Could not load {label}. Refresh the workspace and try again.</p> : (
-    // eslint-disable-next-line @next/next/no-img-element -- local API previews, including SVGs
-    <img src={url} alt={label} onError={() => setFailed(true)} />
-  );
+  if (failed) return <p className="empty-copy">Could not load {label}. Refresh the workspace and try again.</p>;
+  return <div className="image-preview">
+    {!loaded && <p className="image-loading" role="status">Loading preview…</p>}
+    {/* eslint-disable-next-line @next/next/no-img-element -- local API previews, including SVGs */}
+    <img src={url} alt={label} onLoad={() => setLoaded(true)} onError={() => setFailed(true)} />
+  </div>;
 }
 
-function SpinView({ board, version }: { board: Board; version: number }) {
+function SpinView({ board, version, idPrefix }: { board: Board; version: number; idPrefix: string }) {
   const svg = useRef<SVGSVGElement>(null);
   const drag = useRef<{ x: number; y: number; angle: number; elevation: number } | null>(null);
   const [angle, setAngle] = useState(45);
   const [elevation, setElevation] = useState(36);
-  const [zoom, setZoom] = useState(100);
+  const [zoom, setZoom] = useState(120);
   const [draw, setDraw] = useState<ReturnType<typeof createBoardRenderer> | null>(null);
   const [failed, setFailed] = useState(false);
   const modelUrl = board.model ? boardFileUrl(board, board.model) : "";
@@ -84,16 +96,16 @@ function SpinView({ board, version }: { board: Board; version: number }) {
         onLostPointerCapture={() => { drag.current = null; }}
       />
       <div className="rotation">
-        <RangeControl id="board-angle" label="Rotation" value={angle} min={0} max={359} unit="°" change={setAngle} />
-        <RangeControl id="board-tilt" label="Tilt" value={elevation} min={15} max={85} unit="°" change={setElevation} />
-        <RangeControl id="board-zoom" label="Zoom" value={zoom} min={60} max={200} unit="%" change={setZoom} />
-        <button className="button button-secondary" onClick={() => { setAngle(45); setElevation(36); setZoom(100); }}>Reset view</button>
+        <RangeControl id={`${idPrefix}-angle`} label="Rotation" value={angle} min={0} max={359} unit="°" change={setAngle} />
+        <RangeControl id={`${idPrefix}-tilt`} label="Tilt" value={elevation} min={15} max={85} unit="°" change={setElevation} />
+        <RangeControl id={`${idPrefix}-zoom`} label="Zoom" value={zoom} min={60} max={200} unit="%" change={setZoom} />
+        <button className="button button-secondary" onClick={() => { setAngle(45); setElevation(36); setZoom(120); }}>Reset view</button>
       </div>
     </div>
   );
 }
 
-function RangeControl({ id, label, value, min, max, unit, change }: {
+export function RangeControl({ id, label, value, min, max, unit, change }: {
   id: string; label: string; value: number; min: number; max: number; unit: string; change: (value: number) => void;
 }) {
   return <div className="range-control">
@@ -104,44 +116,35 @@ function RangeControl({ id, label, value, min, max, unit, change }: {
   </div>;
 }
 
-function LayoutView({ url, label }: { url: string; label: string }) {
+function LayoutView({ url, label, idPrefix }: { url: string; label: string; idPrefix: string }) {
   const [zoom, setZoom] = useState(100);
   return <div className="layout-view">
     <div className="layout-scroll" role="region" aria-label="Scrollable board layout" tabIndex={zoom > 100 ? 0 : undefined}>
       <div style={{ width: `${zoom}%`, height: `${zoom}%` }}><ImagePreview url={url} label={label} /></div>
     </div>
     <div className="rotation">
-      <RangeControl id="layout-zoom" label="Zoom" min={100} max={300} unit="%" value={zoom} change={setZoom} />
+      <RangeControl id={`${idPrefix}-zoom`} label="Zoom" min={100} max={300} unit="%" value={zoom} change={setZoom} />
       <button className="button button-secondary" onClick={() => setZoom(100)}>Fit board</button>
     </div>
   </div>;
 }
 
-export function BoardView({ mode, board, previews, version, onExport, busy }: {
-  mode: "2d" | "3d" | "schematic" | "datasheets";
+export function BoardView({ mode, board, version, onExport, busy }: {
+  mode: "2d" | "3d";
   board?: Board;
-  previews: string[];
   version: number;
   onExport?: () => void;
   busy?: boolean;
 }) {
-  const files = mode === "datasheets"
-    ? previews.filter((name) => name.endsWith(".png"))
-    : previews.filter((name) => name.endsWith(".svg"));
-
-  if (mode === "schematic" || mode === "datasheets") {
-    return (
-      <section className="panel">
-        <p className="muted">These files may be from another board revision.</p>
-        {files.length ? files.map((file) => (
-          <figure className="reference" key={file}>
-            <figcaption>{file.replace(/^datasheet-/, "").replace(/\.[^.]+$/, "").replaceAll("-", " ")}</figcaption>
-            <ImagePreview key={version} url={`${previewUrl(file)}?v=${version}`} label={file} />
-          </figure>
-        )) : <p className="empty-copy">{mode === "schematic" ? "Run preflight to generate a schematic." : "No cited datasheet pages in this workspace."}</p>}
-      </section>
-    );
-  }
+  const renderPreview = (idPrefix: string) => board
+    ? mode === "3d"
+      ? <SpinView key={`${board.demo}:${board.name}:${version}:${idPrefix}`} board={board} version={version} idPrefix={`${idPrefix}-board`} />
+      : board.top
+        ? <LayoutView key={`${board.demo}:${board.top}:${version}:${idPrefix}`} url={`${boardFileUrl(board, board.top)}?v=${version}`}
+            label={`Top view of ${board.name}`} idPrefix={`${idPrefix}-layout`} />
+        : <p className="empty-copy">No 2D preview available for this board.</p>
+    : <ImagePreview key={`${mode}:${idPrefix}`} url={mode === "2d" ? "/demo/tmp102-rev-c-2d.svg" : "/demo/tmp102-rev-c.svg"}
+        label={`Sample TMP102 Rev C ${mode === "2d" ? "top view" : "isometric view"}`} />;
 
   return (
     <section className="panel board-panel">
@@ -153,19 +156,38 @@ export function BoardView({ mode, board, previews, version, onExport, busy }: {
           {board.gerbers && <a download href={artifactUrl(board.gerbers)}>Gerbers ↓</a>}
           {onExport && <button type="button" className="text-button" disabled={busy} onClick={onExport}>Export Gerbers</button>}
         </div>
-        <div className="board-stage">
-          {mode === "3d" ? <SpinView key={`${board.demo}:${board.name}:${version}`} board={board} version={version} />
-            : board.top ? <LayoutView key={`${board.demo}:${board.top}:${version}`} url={`${boardFileUrl(board, board.top)}?v=${version}`} label={`Top view of ${board.name}`} />
-            : <p className="empty-copy">No 2D preview available for this board.</p>}
+        <div className="board-stage">{renderPreview("inline")}</div>
+        <div className="board-key" aria-label="Board view key">
+          <span><i className="key-mask" /> Solder mask</span>
+          <span><i className="key-pad" /> Pads</span>
+          <span><i className="key-body" /> Component body</span>
         </div>
         <p className="muted">{board.demo ? "Jeden Uno sample. " : ""}{mode === "3d" ? "Drag to rotate and tilt. Component shapes are approximate." : "Zoom in and scroll to inspect pads and traces."}</p>
       </> : <>
-        <div className="board-stage">
-          <ImagePreview key={mode} url={mode === "2d" ? "/demo/tmp102-rev-c-2d.svg" : "/demo/tmp102-rev-c.svg"}
-            label={`Sample TMP102 Rev C ${mode === "2d" ? "top view" : "isometric view"}`} />
+        <div className="board-stage">{renderPreview("sample")}</div>
+        <div className="board-key" aria-label="Board view key">
+          <span><i className="key-mask" /> Solder mask</span>
+          <span><i className="key-pad" /> Pads</span>
+          <span><i className="key-body" /> Component body</span>
         </div>
         <p className="muted">Sample TMP102 Rev C placement. Import or generate a board to inspect your own design.</p>
       </>}
+      <Dialog>
+        <DialogTrigger className="button button-secondary board-expand">View full size</DialogTrigger>
+        <DialogBackdrop className="board-modal-backdrop" />
+        <DialogContent className="board-modal">
+          <div className="board-modal-heading">
+            <div>
+              <DialogTitle>{board?.name.replace(/\.kicad_pcb$/i, "") ?? "TMP102 Rev C"} · {mode} view</DialogTitle>
+              <DialogDescription>
+                {mode === "3d" ? "Drag the board or use the controls to rotate it." : "Zoom and scroll to inspect pads and traces."}
+              </DialogDescription>
+            </div>
+            <DialogClose className="button button-secondary board-modal-close">Close</DialogClose>
+          </div>
+          <div className="board-stage board-modal-stage">{renderPreview("dialog")}</div>
+        </DialogContent>
+      </Dialog>
     </section>
   );
 }
